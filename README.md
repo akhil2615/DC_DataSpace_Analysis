@@ -79,6 +79,8 @@ Core behavior:
 
 ## Prerequisites
 
+If you are setting this up for the first time, complete **Start Here (First-Time Setup)** first, then use this section as a detailed checklist.
+
 Install and verify the following before your first run.
 
 ### 1) Operating System
@@ -126,6 +128,8 @@ git --version
 ## Onboarding Expectations
 
 Short answer: users still need some local prerequisites. The web page simplifies usage, but it does not remove machine setup.
+
+Use **Start Here (First-Time Setup)** for the fastest path (Git clone or ZIP download + setup commands). This section explains the reasoning and boundaries.
 
 What the web launcher handles:
 
