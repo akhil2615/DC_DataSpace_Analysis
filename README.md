@@ -11,6 +11,7 @@ This repository is focused on the DC1 automated fill pipeline only. It does not 
 - Access and Permissions Checklist
 - Local Setup (Step by Step)
 - Authentication and Org Context
+- Why This Uses CLI User Context (Not MCP)
 - Data Space Selection
 - How to Run
 - Output Files and What They Mean
@@ -173,6 +174,54 @@ sf org display --json
 ```
 
 Important: Always verify org context before running fetch.
+
+## Why This Uses CLI User Context (Not MCP)
+
+This project intentionally uses Salesforce CLI user authentication (`sf org login`) instead of an MCP integration layer.
+
+### Design decision summary
+
+- Primary goal: produce a portable automation pipeline any architect can run from a terminal with minimal dependencies.
+- Execution model: direct API calls from Python scripts using the active authenticated Salesforce user context.
+- Authentication source: CLI-managed access token and org context.
+
+### Why this is the preferred approach for this repository
+
+1. Operational simplicity
+- No MCP server installation, MCP config, or tool routing is required.
+- Fewer moving parts means less setup overhead for new users.
+- Easier to onboard architecture and delivery teams that already use `sf`.
+
+2. Environment portability
+- Works in local dev environments, jump boxes, or CI runners where Python + `sf` are available.
+- Does not depend on IDE-specific runtime behavior.
+- Keeps the pipeline runnable outside Cursor workflows.
+
+3. Predictable auth and access control
+- Uses the same identity and permissions model users already manage in Salesforce CLI.
+- Access scope is naturally governed by the logged-in user profile/permission sets.
+- Reduces ambiguity about which credentials are being used at runtime.
+
+4. Easier audit and supportability
+- Org context can be verified with one command: `sf org display --json`.
+- Troubleshooting auth and target-org issues is standardized across Salesforce teams.
+- Run logs and artifacts directly map to CLI session context and org metadata responses.
+
+5. Better fit for document-generation use case
+- This pipeline performs deterministic metadata extraction + document fill.
+- It does not require tool orchestration or interactive assistant workflows to produce outputs.
+- Direct script execution is faster to operationalize for repeatable production runs.
+
+### Security and governance implications
+
+- The pipeline never requires storing long-lived credentials inside the repository.
+- Token lifecycle and login flows are managed by Salesforce CLI standards.
+- Access is least-privilege by default if the logged-in user is scoped appropriately.
+
+### When MCP can still be useful (outside this repo)
+
+MCP can be valuable for interactive exploration, ad-hoc discovery, and assistant-driven workflows.
+For this repository's objective (repeatable DC1 output generation), CLI user-context execution is intentionally the baseline.
 
 ## Data Space Selection
 
