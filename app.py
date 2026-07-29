@@ -9,10 +9,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
+from openpyxl import Workbook
 from starlette.requests import Request
 
 REPO = Path(__file__).resolve().parent
@@ -99,6 +101,85 @@ def append_log(run_id: str, line: str) -> None:
             run["logs"] = run["logs"][-1000:]
 
 
+def excel_safe_sheet_name(name: str, used: set[str]) -> str:
+    cleaned = re.sub(r"[:\\/*?\[\]]", "_", name).strip() or "Sheet"
+    base = cleaned[:31]
+    candidate = base
+    suffix = 1
+    while candidate in used:
+        tail = f"_{suffix}"
+        candidate = (base[: 31 - len(tail)] + tail) if len(base) + len(tail) > 31 else (base + tail)
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def cell_value(v: Any) -> str | int | float | bool:
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    if v is None:
+        return ""
+    return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+
+
+def write_raw_json_sheet(wb: Workbook, sheet_name: str, payload: Any, used_names: set[str]) -> None:
+    ws = wb.create_sheet(excel_safe_sheet_name(sheet_name, used_names))
+    ws.append(["json"])
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    chunk_size = 32000  # keep under Excel's 32767 char cell limit
+    for i in range(0, len(text), chunk_size):
+        ws.append([text[i : i + chunk_size]])
+
+
+def write_records_sheet(wb: Workbook, sheet_name: str, records: list[dict], used_names: set[str]) -> None:
+    ws = wb.create_sheet(excel_safe_sheet_name(sheet_name, used_names))
+    if not records:
+        ws.append(["info"])
+        ws.append(["No records"])
+        return
+    header: list[str] = []
+    seen: set[str] = set()
+    for rec in records:
+        for key in rec.keys():
+            if key not in seen:
+                seen.add(key)
+                header.append(key)
+    ws.append(header)
+    for rec in records:
+        ws.append([cell_value(rec.get(col)) for col in header])
+
+
+def build_cache_workbook(run_id: str, space: str, run_dir: Path) -> Path:
+    wb = Workbook()
+    summary = wb.active
+    summary.title = "Summary"
+    summary.append(["Run ID", run_id])
+    summary.append(["Data Space", space])
+    summary.append(["Generated At UTC", now_utc()])
+    summary.append(["Cache Directory", str(CACHE)])
+
+    used_names = {"Summary"}
+    cache_files = sorted(CACHE.glob("*.json"))
+    summary.append(["Cache File Count", len(cache_files)])
+
+    for f in cache_files:
+        summary.append(["Cache File", f.name])
+        try:
+            payload = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError:
+            write_raw_json_sheet(wb, f"{f.stem}_raw", {"error": "Invalid JSON"}, used_names)
+            continue
+
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if isinstance(records, list) and records and all(isinstance(r, dict) for r in records):
+            write_records_sheet(wb, f"{f.stem}_records", records, used_names)
+        write_raw_json_sheet(wb, f"{f.stem}_raw", payload, used_names)
+
+    out = run_dir / f"DC1_cache_bundle_{space}_{run_id}.xlsx"
+    wb.save(str(out))
+    return out
+
+
 def run_command(run_id: str, step: str, cmd: list[str]) -> int:
     with _lock:
         _runs[run_id]["step"] = step
@@ -146,6 +227,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             "startedAtUtc": now_utc(),
             "finishedAtUtc": None,
             "outputFile": None,
+            "workbookFile": None,
             "runDir": str(run_dir),
             "error": None,
         }
@@ -197,6 +279,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
 
             out_candidates = sorted(docs_dir.glob(f"DC1_Data_Space_Analysis_Record_{safe_space}_LIVE_*.docx"))
             output_file = str(out_candidates[-1]) if out_candidates else None
+            workbook_file = str(build_cache_workbook(run_id=run_id, space=safe_space, run_dir=run_dir))
 
             with _lock:
                 run = _runs[run_id]
@@ -204,6 +287,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 run["step"] = "done"
                 run["finishedAtUtc"] = now_utc()
                 run["outputFile"] = output_file
+                run["workbookFile"] = workbook_file
                 if not output_file:
                     run["error"] = "Run finished but output file was not found."
                     run["status"] = "failed"
@@ -307,3 +391,22 @@ def api_run_download(run_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Output file path no longer exists")
     return FileResponse(path, filename=path.name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@app.get("/api/runs/{run_id}/download-workbook")
+def api_run_download_workbook(run_id: str):
+    with _lock:
+        run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    workbook_file = run.get("workbookFile")
+    if not workbook_file:
+        raise HTTPException(status_code=404, detail="No workbook file for this run")
+    path = Path(workbook_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Workbook file path no longer exists")
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )

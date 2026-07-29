@@ -5,60 +5,200 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DC1 Data Space Analysis Launcher</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #1f2937; }
-    h1 { margin-bottom: 6px; }
-    .muted { color: #4b5563; margin-top: 0; }
-    .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    label { display: block; margin-bottom: 6px; font-weight: 600; }
-    select, button { font-size: 14px; padding: 8px 10px; }
-    select { min-width: 340px; }
-    button { cursor: pointer; margin-right: 8px; }
+    :root {
+      --sf-blue: #0176d3;
+      --sf-blue-dark: #014486;
+      --sf-bg: #f3f3f3;
+      --sf-card: #ffffff;
+      --sf-border: #dddbda;
+      --sf-text: #181818;
+      --sf-muted: #3e3e3c;
+      --ok: #2e844a;
+      --bad: #ba0517;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Salesforce Sans", Arial, sans-serif;
+      background: var(--sf-bg);
+      color: var(--sf-text);
+    }
+    .header {
+      background: linear-gradient(90deg, var(--sf-blue-dark), var(--sf-blue));
+      color: white;
+      padding: 20px 28px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    .header h1 { margin: 0; font-size: 22px; font-weight: 700; }
+    .header p { margin: 8px 0 0; opacity: 0.92; }
+    .container {
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 0 16px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: var(--sf-card);
+      border: 1px solid var(--sf-border);
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+      padding: 16px;
+    }
+    .full { grid-column: 1 / -1; }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      border-bottom: 1px solid var(--sf-border);
+      padding-bottom: 8px;
+    }
     .row { margin-bottom: 12px; }
-    #status { white-space: pre-wrap; background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; }
-    #logs { background: #111827; color: #f9fafb; padding: 10px; border-radius: 8px; max-height: 340px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
-    .ok { color: #065f46; }
-    .bad { color: #991b1b; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; color: var(--sf-muted); }
+    select, button {
+      font-family: inherit;
+      font-size: 14px;
+      border-radius: 4px;
+    }
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #c9c7c5;
+      background: white;
+    }
+    .btn {
+      border: 1px solid #c9c7c5;
+      background: #fff;
+      color: #080707;
+      padding: 8px 12px;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+    .btn:hover { background: #f3f2f2; }
+    .btn-primary {
+      background: var(--sf-blue);
+      border-color: var(--sf-blue);
+      color: white;
+    }
+    .btn-primary:hover { background: #0260b8; }
+    .pill {
+      display: inline-block;
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pill.ok { background: #e3fcef; color: var(--ok); }
+    .pill.bad { background: #fde7e9; color: var(--bad); }
+    .status-grid {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 6px 10px;
+      font-size: 13px;
+    }
+    .status-key { color: var(--sf-muted); font-weight: 600; }
+    #statusMessage {
+      margin-top: 10px;
+      background: #f8f9fb;
+      border: 1px solid #d8dde6;
+      border-radius: 4px;
+      padding: 10px;
+      white-space: pre-wrap;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    #logs {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 200px;
+      max-height: 360px;
+      overflow: auto;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .downloads a {
+      display: inline-block;
+      margin-right: 10px;
+      margin-top: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      color: var(--sf-blue);
+    }
+    .downloads a:hover { text-decoration: underline; }
+    .muted { color: var(--sf-muted); font-size: 12px; }
+    @media (max-width: 980px) { .container { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <h1>DC1 Data Space Analysis Launcher</h1>
-  <p class="muted">Select a data space, run fetch + fill, and download the generated DC1 document.</p>
-
-  <div class="card">
-    <div class="row">
-      <button id="btnPreflight">Run Preflight</button>
-      <button id="btnRefreshSpaces">Refresh Spaces (fetch cache)</button>
-      <span id="preflightResult"></span>
-    </div>
-    <div class="row">
-      <label for="spaceSelect">Data Space</label>
-      <select id="spaceSelect"></select>
-    </div>
-    <div class="row">
-      <label><input type="checkbox" id="freshFetch" checked /> Run fresh fetch before fill</label>
-    </div>
-    <div class="row">
-      <button id="btnRun">Generate DC1 Document</button>
-    </div>
+  <div class="header">
+    <h1>DC1 Data Space Analysis Launcher</h1>
+    <p>Generate a DC1 document and download a workbook bundle of retrieved metadata.</p>
   </div>
 
-  <div class="card">
-    <h3>Run Status</h3>
-    <div id="status">No run started.</div>
-    <p id="download"></p>
-  </div>
+  <div class="container">
+    <section class="card">
+      <h2>Run Controls</h2>
+      <div class="row">
+        <button id="btnPreflight" class="btn">Run Preflight</button>
+        <button id="btnRefreshSpaces" class="btn">Refresh Spaces</button>
+        <span id="preflightBadge" class="pill">Not run</span>
+      </div>
+      <div class="row">
+        <label for="spaceSelect">Data Space</label>
+        <select id="spaceSelect"></select>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="freshFetch" checked /> Run fresh fetch before fill</label>
+      </div>
+      <div class="row">
+        <button id="btnRun" class="btn btn-primary">Generate Analysis Bundle</button>
+      </div>
+      <div class="muted">Tip: keep fresh fetch enabled for production-quality documentation outputs.</div>
+    </section>
 
-  <div class="card">
-    <h3>Live Logs</h3>
-    <div id="logs">(logs will appear here)</div>
+    <section class="card">
+      <h2>Run Status</h2>
+      <div class="status-grid">
+        <div class="status-key">Run ID</div><div id="sRunId">-</div>
+        <div class="status-key">Space</div><div id="sSpace">-</div>
+        <div class="status-key">Status</div><div id="sStatus">No run started</div>
+        <div class="status-key">Step</div><div id="sStep">-</div>
+        <div class="status-key">Started</div><div id="sStart">-</div>
+        <div class="status-key">Finished</div><div id="sFinish">-</div>
+        <div class="status-key">Error</div><div id="sError">-</div>
+      </div>
+      <div class="downloads" id="downloads"></div>
+      <div id="statusMessage">Waiting for actions...</div>
+    </section>
+
+    <section class="card full">
+      <h2>Live Logs</h2>
+      <div id="logs">(logs will appear here)</div>
+    </section>
   </div>
 
   <script>
     let activeRunId = null;
     let pollTimer = null;
 
-    function setStatus(text) {
-      document.getElementById("status").textContent = text;
+    function setStatusMessage(text) {
+      document.getElementById("statusMessage").textContent = text;
+    }
+
+    function setPreflightBadge(ok, text) {
+      const b = document.getElementById("preflightBadge");
+      b.textContent = text;
+      b.className = "pill " + (ok ? "ok" : "bad");
+    }
+
+    function setField(id, value) {
+      document.getElementById(id).textContent = value ?? "-";
     }
 
     async function getJson(url, options) {
@@ -83,7 +223,7 @@
       if (data.count === 0) {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "No spaces in cache. Click 'Refresh Spaces'.";
+        opt.textContent = "No spaces in cache. Click Refresh Spaces.";
         sel.appendChild(opt);
       }
     }
@@ -93,46 +233,53 @@
       const checks = data.checks || {};
       const ok = Object.values(checks).every(Boolean);
       const org = data.org || {};
-      const el = document.getElementById("preflightResult");
       if (ok) {
-        el.className = "ok";
-        el.textContent = `OK | org=${org.orgId || "unknown"} | user=${org.username || "unknown"}`;
+        setPreflightBadge(true, "Preflight OK");
       } else {
-        el.className = "bad";
-        el.textContent = "Preflight failed. Check status panel.";
+        setPreflightBadge(false, "Preflight Failed");
       }
-      setStatus(JSON.stringify(data, null, 2));
+      setStatusMessage(JSON.stringify({
+        checks,
+        orgId: org.orgId || null,
+        username: org.username || null,
+        instanceUrl: org.instanceUrl || null,
+        orgError: org.error || null
+      }, null, 2));
     }
 
     async function refreshSpaces() {
-      setStatus("Refreshing spaces from live org...");
+      setStatusMessage("Refreshing spaces from live org...");
       const data = await getJson("/api/spaces/refresh", { method: "POST" });
       await loadSpaces();
-      setStatus(`Spaces refreshed. Count=${(data.spaces || []).length}`);
+      setStatusMessage(`Spaces refreshed successfully. Count=${(data.spaces || []).length}`);
     }
 
     function renderRun(run) {
-      const status = [
-        `Run ID: ${run.id}`,
-        `Space: ${run.space}`,
-        `Fresh Fetch: ${run.freshFetch}`,
-        `Status: ${run.status}`,
-        `Step: ${run.step}`,
-        `Started: ${run.startedAtUtc}`,
-        `Finished: ${run.finishedAtUtc || "-"}`,
-        `Error: ${run.error || "-"}`,
-      ].join("\n");
-      setStatus(status);
+      setField("sRunId", run.id);
+      setField("sSpace", run.space);
+      setField("sStatus", run.status);
+      setField("sStep", run.step);
+      setField("sStart", run.startedAtUtc);
+      setField("sFinish", run.finishedAtUtc || "-");
+      setField("sError", run.error || "-");
 
-      const logs = (run.logs || []).join("\n");
-      document.getElementById("logs").textContent = logs || "(no logs yet)";
+      document.getElementById("logs").textContent = (run.logs || []).join("\n") || "(no logs yet)";
 
-      const dl = document.getElementById("download");
+      const d = document.getElementById("downloads");
+      d.innerHTML = "";
       if (run.status === "completed" && run.outputFile) {
-        dl.innerHTML = `<a href="/api/runs/${run.id}/download">Download generated document</a>`;
-      } else {
-        dl.innerHTML = "";
+        const docLink = document.createElement("a");
+        docLink.href = `/api/runs/${run.id}/download`;
+        docLink.textContent = "Download DC1 Document (.docx)";
+        d.appendChild(docLink);
       }
+      if (run.status === "completed" && run.workbookFile) {
+        const xlsxLink = document.createElement("a");
+        xlsxLink.href = `/api/runs/${run.id}/download-workbook`;
+        xlsxLink.textContent = "Download Metadata Workbook (.xlsx)";
+        d.appendChild(xlsxLink);
+      }
+      setStatusMessage(JSON.stringify(run, null, 2));
     }
 
     async function pollRun() {
@@ -145,7 +292,7 @@
           pollTimer = null;
         }
       } catch (err) {
-        setStatus("Polling failed: " + err.message);
+        setStatusMessage("Polling failed: " + err.message);
       }
     }
 
@@ -153,17 +300,16 @@
       const space = document.getElementById("spaceSelect").value.trim();
       const freshFetch = document.getElementById("freshFetch").checked;
       if (!space) {
-        setStatus("Please select a valid data space.");
+        setStatusMessage("Please select a valid data space.");
         return;
       }
-      const body = JSON.stringify({ space, freshFetch });
       const data = await getJson("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body,
+        body: JSON.stringify({ space, freshFetch })
       });
       activeRunId = data.runId;
-      setStatus(`Run started: ${activeRunId}`);
+      setStatusMessage(`Run started: ${activeRunId}`);
       document.getElementById("logs").textContent = "(collecting logs...)";
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(pollRun, 2000);
@@ -171,16 +317,16 @@
     }
 
     document.getElementById("btnPreflight").addEventListener("click", async () => {
-      try { await runPreflight(); } catch (err) { setStatus(err.message); }
+      try { await runPreflight(); } catch (err) { setStatusMessage(err.message); }
     });
     document.getElementById("btnRefreshSpaces").addEventListener("click", async () => {
-      try { await refreshSpaces(); } catch (err) { setStatus(err.message); }
+      try { await refreshSpaces(); } catch (err) { setStatusMessage(err.message); }
     });
     document.getElementById("btnRun").addEventListener("click", async () => {
-      try { await startRun(); } catch (err) { setStatus(err.message); }
+      try { await startRun(); } catch (err) { setStatusMessage(err.message); }
     });
 
-    loadSpaces().catch(err => setStatus(err.message));
+    loadSpaces().catch(err => setStatusMessage(err.message));
   </script>
 </body>
 </html>

@@ -320,7 +320,7 @@ The repository now includes a lightweight local web app so users can select a da
 ### Start the web app
 
 ```bash
-uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Open:
@@ -333,14 +333,22 @@ Open:
 2. Click **Refresh Spaces** to fetch latest metadata and load space list.
 3. Select the target data space from dropdown.
 4. Keep **Run fresh fetch** enabled for a full current run (recommended).
-5. Click **Generate DC1 Document**.
-6. Watch live logs and download the generated `.docx` when complete.
+5. Click **Generate Analysis Bundle**.
+6. Watch live logs and download both outputs when complete:
+   - DC1 document (`.docx`)
+   - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
 
 ### Web-run artifacts
 
-- UI-driven runs are written under `runs/web/<run-id>/docs/`.
-- The generated file name pattern remains:
+- UI-driven runs are written under `runs/web/<run-id>/`.
+- Document output is written under `runs/web/<run-id>/docs/`.
+- Document file pattern:
   - `DC1_Data_Space_Analysis_Record_<space>_LIVE_<orgId>_<yyyymmdd>.docx`
+- Workbook bundle pattern:
+  - `DC1_cache_bundle_<space>_<run-id>.xlsx`
+- Workbook contents:
+  - `Summary` tab with run metadata and cache file index
+  - one or more tabs per cache file (records and raw JSON views)
 
 ## Recommended Run Patterns
 
