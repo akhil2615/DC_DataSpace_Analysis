@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import which
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -48,8 +50,17 @@ def load_spaces_from_cache() -> list[str]:
 
 
 def read_org_context() -> dict:
-    cmd = ["sf", "org", "display", "--json"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO), check=False)
+    sf_bin = which("sf")
+    if not sf_bin:
+        return {
+            "ok": False,
+            "error": "Salesforce CLI (sf) was not found in PATH. Open a terminal where sf works and start the web app from that same environment.",
+        }
+    cmd = [sf_bin, "org", "display", "--json"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO), check=False)
+    except OSError as exc:
+        return {"ok": False, "error": f"Failed to run sf CLI: {exc}"}
     if proc.returncode != 0:
         return {"ok": False, "error": (proc.stderr or proc.stdout).strip() or "sf org display failed"}
     try:
@@ -92,14 +103,18 @@ def run_command(run_id: str, step: str, cmd: list[str]) -> int:
     with _lock:
         _runs[run_id]["step"] = step
     append_log(run_id, f"$ {' '.join(cmd)}")
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(REPO),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        append_log(run_id, f"[{step}] failed to start: {exc}")
+        return 1
     assert proc.stdout is not None
     for line in proc.stdout:
         append_log(run_id, line)
@@ -148,7 +163,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                     run_id,
                     "fetch",
                     [
-                        "python",
+                        sys.executable,
                         "-u",
                         str(FETCH_SCRIPT),
                         "--clean-cache",
@@ -168,7 +183,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 run_id,
                 "fill",
                 [
-                    "python",
+                    sys.executable,
                     "-u",
                     str(FILL_SCRIPT),
                     "--space",
@@ -231,7 +246,7 @@ def api_spaces_refresh():
         if _active_run_id:
             raise HTTPException(status_code=409, detail="Cannot refresh while a run is active.")
     cmd = [
-        "python",
+        sys.executable,
         "-u",
         str(FETCH_SCRIPT),
         "--clean-cache",
