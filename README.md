@@ -4,6 +4,29 @@ Generate a space-specific Data Cloud Data Space Analysis record (`.docx`) from l
 
 This repository is focused on the automated Data Cloud Data Space Analysis pipeline. It does not require MCP server setup.
 
+## Start Here (First-Time Setup)
+
+Run this once on a new machine before opening the local launcher.
+
+Windows (PowerShell):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+macOS / Linux:
+
+```bash
+chmod +x scripts/setup_unix.sh
+./scripts/setup_unix.sh
+.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Then open:
+
+- [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
 ## Table of Contents
 
 - Overview
@@ -389,7 +412,7 @@ Open:
    - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
 
-Tip: the launcher page includes a built-in **First-Time User Walkthrough** panel with setup commands and a checklist for new users.
+Tip: use the **Start Here (First-Time Setup)** section in this README for new-user onboarding before opening the launcher.
 
 ### Web-run artifacts
 

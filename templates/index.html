@@ -133,51 +133,6 @@
     }
     .downloads a:hover { text-decoration: underline; }
     .muted { color: var(--sf-muted); font-size: 12px; }
-    .guide {
-      background: #eef4ff;
-      border: 1px solid #bfd7ff;
-    }
-    .guide h2 { border-bottom-color: #bfd7ff; }
-    .guide-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    .guide ol {
-      margin: 8px 0 0 18px;
-      padding: 0;
-      line-height: 1.4;
-      font-size: 13px;
-    }
-    .guide ul {
-      margin: 8px 0 0 18px;
-      padding: 0;
-      line-height: 1.4;
-      font-size: 13px;
-    }
-    .checklist label {
-      display: block;
-      font-weight: 400;
-      color: var(--sf-text);
-      margin-bottom: 6px;
-    }
-    .code {
-      background: #0b1020;
-      color: #e2e8f0;
-      padding: 8px;
-      border-radius: 6px;
-      font-family: Consolas, monospace;
-      font-size: 12px;
-      overflow: auto;
-      white-space: pre;
-      margin-top: 8px;
-    }
-    .guide-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-    }
     @media (max-width: 980px) { .container { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -185,43 +140,9 @@
   <div class="header">
     <h1>Data Cloud Data Space Analysis Launcher</h1>
     <p>Generate the analysis document and download a workbook bundle of retrieved metadata.</p>
-    <p><button id="btnShowGuide" class="btn" style="margin-top:8px;">Show First-Time Guide</button></p>
   </div>
 
   <div class="container">
-    <section class="card full guide" id="firstTimeGuide">
-      <div class="guide-top">
-        <h2>First-Time User Walkthrough</h2>
-        <button id="btnHideGuide" class="btn">Hide Guide</button>
-      </div>
-      <div class="guide-grid">
-        <div>
-          <div class="muted">Follow this once per machine.</div>
-          <ol>
-            <li>Run the setup script for your operating system.</li>
-            <li>Start this launcher (`python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`).</li>
-            <li>Click <b>Check Setup</b>.</li>
-            <li>Click <b>Load Latest Data Spaces</b>.</li>
-            <li>Select one data space and click <b>Generate Analysis Files</b>.</li>
-            <li>Download both outputs: analysis document and metadata workbook.</li>
-          </ol>
-        </div>
-        <div>
-          <div class="muted">Quick setup commands</div>
-          <div><b>Windows (PowerShell)</b></div>
-          <div class="code">powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1</div>
-          <div style="margin-top:8px;"><b>macOS / Linux</b></div>
-          <div class="code">chmod +x scripts/setup_unix.sh
-./scripts/setup_unix.sh</div>
-          <div class="checklist" style="margin-top:10px;">
-            <label><input type="checkbox" class="guide-check" data-key="tooling" /> Python, Git, and Salesforce CLI installed</label>
-            <label><input type="checkbox" class="guide-check" data-key="auth" /> Logged in to correct Salesforce org (`sf org display --json` works)</label>
-            <label><input type="checkbox" class="guide-check" data-key="generated" /> Generated and downloaded both output files successfully</label>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section class="card">
       <h2>Run Controls</h2>
       <div class="row">
@@ -267,7 +188,6 @@
   <script>
     let activeRunId = null;
     let pollTimer = null;
-    const GUIDE_STORAGE_KEY = "analysisLauncherGuideState";
 
     function setStatusMessage(text) {
       document.getElementById("statusMessage").textContent = text;
@@ -283,40 +203,6 @@
       document.getElementById(id).textContent = value ?? "-";
     }
 
-    function loadGuideState() {
-      const raw = localStorage.getItem(GUIDE_STORAGE_KEY);
-      if (!raw) return {};
-      try { return JSON.parse(raw); } catch { return {}; }
-    }
-
-    function saveGuideState(next) {
-      localStorage.setItem(GUIDE_STORAGE_KEY, JSON.stringify(next));
-    }
-
-    function initGuide() {
-      const state = loadGuideState();
-      const guide = document.getElementById("firstTimeGuide");
-      if (state.hidden) guide.style.display = "none";
-
-      document.getElementById("btnHideGuide").addEventListener("click", () => {
-        guide.style.display = "none";
-        saveGuideState({ ...loadGuideState(), hidden: true });
-      });
-      document.getElementById("btnShowGuide").addEventListener("click", () => {
-        guide.style.display = "";
-        saveGuideState({ ...loadGuideState(), hidden: false });
-      });
-
-      document.querySelectorAll(".guide-check").forEach(el => {
-        const key = el.getAttribute("data-key");
-        el.checked = Boolean(state[key]);
-        el.addEventListener("change", () => {
-          const curr = loadGuideState();
-          curr[key] = el.checked;
-          saveGuideState(curr);
-        });
-      });
-    }
 
     async function getJson(url, options) {
       const res = await fetch(url, options);
@@ -453,7 +339,6 @@
       try { await startRun(); } catch (err) { setStatusMessage(err.message); }
     });
 
-    initGuide();
     loadSpaces().catch(err => setStatusMessage(err.message));
   </script>
 </body>
