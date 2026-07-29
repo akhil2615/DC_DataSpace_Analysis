@@ -146,21 +146,22 @@
     <section class="card">
       <h2>Run Controls</h2>
       <div class="row">
-        <button id="btnPreflight" class="btn">Run Preflight</button>
-        <button id="btnRefreshSpaces" class="btn">Refresh Spaces</button>
-        <span id="preflightBadge" class="pill">Not run</span>
+        <button id="btnPreflight" class="btn">1) Check Setup</button>
+        <button id="btnRefreshSpaces" class="btn">2) Load Latest Data Spaces</button>
+        <span id="preflightBadge" class="pill">Not checked</span>
       </div>
+      <div class="muted">Step 1 checks your login, template, and required files. Step 2 updates the list of available data spaces from your org.</div>
       <div class="row">
         <label for="spaceSelect">Data Space</label>
         <select id="spaceSelect"></select>
       </div>
       <div class="row">
-        <label><input type="checkbox" id="freshFetch" checked /> Run fresh fetch before fill</label>
+        <label><input type="checkbox" id="freshFetch" checked /> Pull latest metadata before generating document (recommended)</label>
       </div>
       <div class="row">
-        <button id="btnRun" class="btn btn-primary">Generate Analysis Bundle</button>
+        <button id="btnRun" class="btn btn-primary">3) Generate Analysis Files</button>
       </div>
-      <div class="muted">Tip: keep fresh fetch enabled for production-quality documentation outputs.</div>
+      <div class="muted">When enabled, the app gets latest metadata first, then creates the document and workbook. Turn it off only if you want to reuse existing cached data.</div>
     </section>
 
     <section class="card">
@@ -235,9 +236,9 @@
       const ok = Object.values(checks).every(Boolean);
       const org = data.org || {};
       if (ok) {
-        setPreflightBadge(true, "Preflight OK");
+        setPreflightBadge(true, "Setup Ready");
       } else {
-        setPreflightBadge(false, "Preflight Failed");
+        setPreflightBadge(false, "Setup Needs Attention");
       }
       setStatusMessage(JSON.stringify({
         checks,
@@ -249,16 +250,17 @@
     }
 
     async function refreshSpaces() {
-      setStatusMessage("Refreshing spaces from live org...");
+      setStatusMessage("Loading latest data spaces from your org...");
       const data = await getJson("/api/spaces/refresh", { method: "POST" });
       await loadSpaces();
-      setStatusMessage(`Spaces refreshed successfully. Count=${(data.spaces || []).length}`);
+      setStatusMessage(`Data spaces loaded successfully. Available spaces: ${(data.spaces || []).length}`);
     }
 
     function renderRun(run) {
       setField("sRunId", run.id);
       setField("sSpace", run.space);
-      setField("sStatus", run.status);
+      const friendlyStatus = run.status === "running" ? "In Progress" : (run.status === "completed" ? "Completed" : (run.status === "failed" ? "Failed" : run.status));
+      setField("sStatus", friendlyStatus);
       setField("sStep", run.step);
       setField("sStart", run.startedAtUtc);
       setField("sFinish", run.finishedAtUtc || "-");
@@ -286,7 +288,7 @@
       if (run.status === "completed" && run.workbookFile) {
         const xlsxLink = document.createElement("a");
         xlsxLink.href = `/api/runs/${run.id}/download-workbook`;
-        xlsxLink.textContent = "Download Metadata Workbook (.xlsx)";
+        xlsxLink.textContent = "Download Metadata Workbook (.xlsx, multiple tabs)";
         d.appendChild(xlsxLink);
       }
       setStatusMessage(JSON.stringify(run, null, 2));
@@ -302,7 +304,7 @@
           pollTimer = null;
         }
       } catch (err) {
-        setStatusMessage("Polling failed: " + err.message);
+        setStatusMessage("Could not refresh run status: " + err.message);
       }
     }
 
@@ -310,7 +312,7 @@
       const space = document.getElementById("spaceSelect").value.trim();
       const freshFetch = document.getElementById("freshFetch").checked;
       if (!space) {
-        setStatusMessage("Please select a valid data space.");
+        setStatusMessage("Please select a data space before generating files.");
         return;
       }
       const data = await getJson("/api/run", {
@@ -319,7 +321,7 @@
         body: JSON.stringify({ space, freshFetch })
       });
       activeRunId = data.runId;
-      setStatusMessage(`Run started: ${activeRunId}`);
+      setStatusMessage(`Generation started (Run ID: ${activeRunId}). You can follow progress in Live Logs.`);
       document.getElementById("logs").innerHTML = "<ul><li>Collecting logs...</li></ul>";
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(pollRun, 2000);

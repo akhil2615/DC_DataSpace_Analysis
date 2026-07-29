@@ -329,10 +329,10 @@ Open:
 
 ### UI workflow
 
-1. Click **Run Preflight** to validate template, scripts, and CLI auth.
-2. Click **Refresh Spaces** to fetch latest metadata and load space list.
-3. Select the target data space from dropdown.
-4. Keep **Run fresh fetch** enabled for a full current run (recommended).
+1. Click **Check Setup** to validate login, template, and required files.
+2. Click **Load Latest Data Spaces** to refresh the data space dropdown from your org.
+3. Select the target data space.
+4. Keep **Pull latest metadata before generating document** enabled for current-state output (recommended).
 5. Click **Generate Analysis Bundle**.
 6. Watch live logs and download both outputs when complete:
    - analysis document (`.docx`)
