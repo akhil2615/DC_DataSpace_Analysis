@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DC1 Data Space Analysis Launcher</title>
+  <title>Data Cloud Data Space Analysis Launcher</title>
   <style>
     :root {
       --sf-blue: #0176d3;
@@ -120,8 +120,9 @@
       overflow: auto;
       font-family: Consolas, monospace;
       font-size: 12px;
-      white-space: pre-wrap;
     }
+    #logs ul { margin: 0; padding-left: 18px; }
+    #logs li { margin-bottom: 4px; line-height: 1.35; }
     .downloads a {
       display: inline-block;
       margin-right: 10px;
@@ -137,8 +138,8 @@
 </head>
 <body>
   <div class="header">
-    <h1>DC1 Data Space Analysis Launcher</h1>
-    <p>Generate a DC1 document and download a workbook bundle of retrieved metadata.</p>
+    <h1>Data Cloud Data Space Analysis Launcher</h1>
+    <p>Generate the analysis document and download a workbook bundle of retrieved metadata.</p>
   </div>
 
   <div class="container">
@@ -179,7 +180,7 @@
 
     <section class="card full">
       <h2>Live Logs</h2>
-      <div id="logs">(logs will appear here)</div>
+      <div id="logs"><ul><li>Logs will appear here.</li></ul></div>
     </section>
   </div>
 
@@ -263,14 +264,23 @@
       setField("sFinish", run.finishedAtUtc || "-");
       setField("sError", run.error || "-");
 
-      document.getElementById("logs").textContent = (run.logs || []).join("\n") || "(no logs yet)";
+      const logsEl = document.getElementById("logs");
+      const logs = run.logs || [];
+      if (!logs.length) {
+        logsEl.innerHTML = "<ul><li>No logs yet.</li></ul>";
+      } else {
+        const escaped = logs.map(line =>
+          line.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        );
+        logsEl.innerHTML = "<ul>" + escaped.map(line => `<li>${line}</li>`).join("") + "</ul>";
+      }
 
       const d = document.getElementById("downloads");
       d.innerHTML = "";
       if (run.status === "completed" && run.outputFile) {
         const docLink = document.createElement("a");
         docLink.href = `/api/runs/${run.id}/download`;
-        docLink.textContent = "Download DC1 Document (.docx)";
+        docLink.textContent = "Download Analysis Document (.docx)";
         d.appendChild(docLink);
       }
       if (run.status === "completed" && run.workbookFile) {
@@ -310,7 +320,7 @@
       });
       activeRunId = data.runId;
       setStatusMessage(`Run started: ${activeRunId}`);
-      document.getElementById("logs").textContent = "(collecting logs...)";
+      document.getElementById("logs").innerHTML = "<ul><li>Collecting logs...</li></ul>";
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(pollRun, 2000);
       await pollRun();

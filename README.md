@@ -1,6 +1,6 @@
-# DC1 Data Space Analysis Record - Automated Fill Pipeline
+# Data Cloud Data Space Analysis - Automated Fill Pipeline
 
-Generate a space-specific DC1 Data Space Analysis Record (`.docx`) from live Salesforce Data Cloud metadata.
+Generate a space-specific Data Cloud Data Space Analysis record (`.docx`) from live Salesforce Data Cloud metadata.
 
 This repository is focused on the DC1 automated fill pipeline only. It does not require MCP server setup.
 
@@ -335,17 +335,17 @@ Open:
 4. Keep **Run fresh fetch** enabled for a full current run (recommended).
 5. Click **Generate Analysis Bundle**.
 6. Watch live logs and download both outputs when complete:
-   - DC1 document (`.docx`)
+   - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
 
 ### Web-run artifacts
 
 - UI-driven runs are written under `runs/web/<run-id>/`.
 - Document output is written under `runs/web/<run-id>/docs/`.
-- Document file pattern:
-  - `DC1_Data_Space_Analysis_Record_<space>_LIVE_<orgId>_<yyyymmdd>.docx`
+- Document file pattern (web launcher output):
+  - `DataCloud_DataSpace_Analysis_Record_<space>_<run-id>.docx`
 - Workbook bundle pattern:
-  - `DC1_cache_bundle_<space>_<run-id>.xlsx`
+  - `DataCloud_DataSpace_Metadata_Bundle_<space>_<run-id>.xlsx`
 - Workbook contents:
   - `Summary` tab with run metadata and cache file index
   - one or more tabs per cache file (records and raw JSON views)

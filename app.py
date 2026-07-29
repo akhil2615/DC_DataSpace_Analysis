@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
+import shutil
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -24,7 +25,7 @@ SCRIPTS = REPO / "scripts"
 FETCH_SCRIPT = SCRIPTS / "dc1_fetch_live.py"
 FILL_SCRIPT = SCRIPTS / "fill_dc1_live.py"
 
-app = FastAPI(title="DC1 Data Space Analysis Launcher")
+app = FastAPI(title="Data Cloud Data Space Analysis Launcher")
 templates = Jinja2Templates(directory=str(REPO / "templates"))
 
 _lock = threading.Lock()
@@ -175,7 +176,7 @@ def build_cache_workbook(run_id: str, space: str, run_dir: Path) -> Path:
             write_records_sheet(wb, f"{f.stem}_records", records, used_names)
         write_raw_json_sheet(wb, f"{f.stem}_raw", payload, used_names)
 
-    out = run_dir / f"DC1_cache_bundle_{space}_{run_id}.xlsx"
+    out = run_dir / f"DataCloud_DataSpace_Metadata_Bundle_{space}_{run_id}.xlsx"
     wb.save(str(out))
     return out
 
@@ -279,6 +280,11 @@ def start_run(space: str, fresh_fetch: bool) -> str:
 
             out_candidates = sorted(docs_dir.glob(f"DC1_Data_Space_Analysis_Record_{safe_space}_LIVE_*.docx"))
             output_file = str(out_candidates[-1]) if out_candidates else None
+            if output_file:
+                source = Path(output_file)
+                renamed = docs_dir / f"DataCloud_DataSpace_Analysis_Record_{safe_space}_{run_id}.docx"
+                shutil.copy2(source, renamed)
+                output_file = str(renamed)
             workbook_file = str(build_cache_workbook(run_id=run_id, space=safe_space, run_dir=run_dir))
 
             with _lock:
