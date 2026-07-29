@@ -389,6 +389,8 @@ Open:
    - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
 
+Tip: the launcher page includes a built-in **First-Time User Walkthrough** panel with setup commands and a checklist for new users.
+
 ### Web-run artifacts
 
 - UI-driven runs are written under `runs/web/<run-id>/`.
