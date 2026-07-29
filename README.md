@@ -76,8 +76,8 @@ git --version
 
 ### 5) DC1 template file
 
-- Ensure the DC1 template file exists in the expected project location used by the scripts.
-- If your team uses a custom template filename/path, align it before running.
+- The default template is included in this repository root as `DC1_Data_Space_Analysis_Record_TEMPLATE.docx`.
+- If your team uses a custom template filename/path, align script expectations before running.
 
 ## Access and Permissions Checklist
 
