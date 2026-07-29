@@ -1,4 +1,4 @@
-"""Production runner for DC1 generation.
+"""Production runner for Data Cloud Data Space Analysis generation.
 
 Runs one fetch on the current CLI user context, then generates one document per
 data space from cache, with a run manifest for auditability.
@@ -40,7 +40,7 @@ def parse_saved_path(stdout: str) -> str:
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
-    ap = argparse.ArgumentParser(description="Fetch once and generate DC1 docs per data space.")
+    ap = argparse.ArgumentParser(description="Fetch once and generate analysis docs per data space.")
     ap.add_argument("--all-connectors", action="store_true", help="Probe all connector types during fetch.")
     ap.add_argument("--workers", type=int, default=8, help="Fetch concurrency.")
     ap.add_argument("--max-retries", type=int, default=4, help="Retry count for transient API failures.")
@@ -71,7 +71,7 @@ def main() -> None:
 
     fetch_cmd = [
         sys.executable,
-        str(SCRIPTS / "dc1_fetch_live.py"),
+        str(SCRIPTS / "fetch_live.py"),
         "--workers",
         str(args.workers),
         "--max-retries",
@@ -102,15 +102,15 @@ def main() -> None:
         print(fetch.stderr, file=sys.stderr)
         raise SystemExit(fetch.returncode)
 
-    prov = load_json(REPO / ".dc1-cache" / "_provenance.json")
-    spaces = args.spaces or [s.get("name") for s in load_json(REPO / ".dc1-cache" / "data-spaces.json").get("records", []) if s.get("name")]
+    prov = load_json(REPO / ".data-space-analysis-cache" / "_provenance.json")
+    spaces = args.spaces or [s.get("name") for s in load_json(REPO / ".data-space-analysis-cache" / "data-spaces.json").get("records", []) if s.get("name")]
     if not spaces:
         raise SystemExit("No data spaces found in cache.")
 
     for sp in spaces:
         fill_cmd = [
             sys.executable,
-            str(SCRIPTS / "fill_dc1_live.py"),
+            str(SCRIPTS / "fill_live.py"),
             "--space",
             sp,
             "--output-dir",
@@ -138,7 +138,7 @@ def main() -> None:
 
     # Architect-friendly report artifacts.
     md = [
-        "# DC1 Batch Run Report",
+        "# Data Cloud Data Space Analysis Batch Run Report",
         "",
         f"- **Run start (UTC):** {manifest['startedAtUtc']}",
         f"- **Run end (UTC):** {manifest['finishedAtUtc']}",

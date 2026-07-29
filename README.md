@@ -2,12 +2,13 @@
 
 Generate a space-specific Data Cloud Data Space Analysis record (`.docx`) from live Salesforce Data Cloud metadata.
 
-This repository is focused on the DC1 automated fill pipeline only. It does not require MCP server setup.
+This repository is focused on the automated Data Cloud Data Space Analysis pipeline. It does not require MCP server setup.
 
 ## Table of Contents
 
 - Overview
 - Prerequisites
+- Onboarding Expectations
 - Access and Permissions Checklist
 - Local Setup (Step by Step)
 - Authentication and Org Context
@@ -25,8 +26,8 @@ This repository is focused on the DC1 automated fill pipeline only. It does not 
 
 The pipeline has two main stages:
 
-1. Fetch metadata from Data Cloud APIs into a local cache (`.dc1-cache/`).
-2. Fill the DC1 Word template for a specific data space using cached metadata.
+1. Fetch metadata from Data Cloud APIs into a local cache (`.data-space-analysis-cache/`).
+2. Fill the analysis Word template for a specific data space using cached metadata.
 
 Core behavior:
 
@@ -76,10 +77,37 @@ sf --version
 git --version
 ```
 
-### 5) DC1 template file
+### 5) Analysis template file
 
-- The default template is included in this repository root as `DC1_Data_Space_Analysis_Record_TEMPLATE.docx`.
+- The default template is included in this repository root as `DataCloud_DataSpace_Analysis_Record_TEMPLATE.docx`.
 - If your team uses a custom template filename/path, align script expectations before running.
+
+## Onboarding Expectations
+
+Short answer: users still need some local prerequisites. The web page simplifies usage, but it does not remove machine setup.
+
+What the web launcher handles:
+
+- guided run steps for setup checks, data space loading, and analysis generation
+- one-click execution of data retrieval + document/workbook creation
+- run status, logs, and file downloads
+
+What must still exist on each user machine:
+
+- Python 3.10+
+- Salesforce CLI (`sf`)
+- a valid Salesforce CLI login session for the target org
+- Windows or macOS terminal access (PowerShell, Terminal, or equivalent)
+
+Platform note:
+
+- Supported for setup scripts: **Windows** and **macOS/Linux**.
+- **iOS (iPhone/iPad)** is not supported for local execution because Salesforce CLI and local Python automation are required.
+
+Why this is required:
+
+- the launcher runs local Python scripts for metadata retrieval and file generation
+- Data Cloud metadata retrieval uses authenticated Salesforce CLI user context
 
 ## Access and Permissions Checklist
 
@@ -99,6 +127,29 @@ Recommended role profile:
 If access is missing, the fetch step may return 400/403/404/500 for specific endpoints.
 
 ## Local Setup (Step by Step)
+
+### Fastest onboarding (recommended scripts)
+
+Windows PowerShell:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
+```
+
+macOS/Linux:
+
+```bash
+chmod +x scripts/setup_unix.sh
+./scripts/setup_unix.sh
+```
+
+These scripts:
+
+- validate required tools (`python`, `git`, `sf`)
+- create `.venv` if missing
+- install `requirements.txt`
+- check Salesforce CLI org auth context
+- print the exact launcher start command
 
 ### 1) Clone repository
 
@@ -146,9 +197,9 @@ pip install -r requirements.txt
 ### 4) Confirm scripts are discoverable
 
 ```bash
-python -u scripts/dc1_fetch_live.py --help
-python -u scripts/fill_dc1_live.py --help
-python -u scripts/dc1_run.py --help
+python -u scripts/fetch_live.py --help
+python -u scripts/fill_live.py --help
+python -u scripts/run_pipeline.py --help
 ```
 
 ## Authentication and Org Context
@@ -228,7 +279,7 @@ This project intentionally uses Salesforce CLI user authentication (`sf org logi
 ### When MCP can still be useful (outside this repo)
 
 MCP can be valuable for interactive exploration, ad-hoc discovery, and assistant-driven workflows.
-For this repository's objective (repeatable DC1 output generation), CLI user-context execution is intentionally the baseline.
+For this repository's objective (repeatable analysis output generation), CLI user-context execution is intentionally the baseline.
 
 ## Data Space Selection
 
@@ -248,20 +299,20 @@ For production usage, prefer one space per run for better control and review.
 Step 1: Fresh metadata fetch
 
 ```bash
-python -u scripts/dc1_fetch_live.py --clean-cache --workers 8 --max-retries 4 --retry-base-ms 400 --adaptive-throttle
+python -u scripts/fetch_live.py --clean-cache --workers 8 --max-retries 4 --retry-base-ms 400 --adaptive-throttle
 ```
 
 What this does:
 
 - Clears stale cache (`--clean-cache`)
-- Fetches metadata used by the DC1 template
+- Fetches metadata used by the analysis template
 - Retries transient failures
 - Slows automatically when API usage is high
 
 Step 2: Generate one data space record
 
 ```bash
-python -u scripts/fill_dc1_live.py --space default
+python -u scripts/fill_live.py --space default
 ```
 
 Replace `default` with your target data space name.
@@ -271,13 +322,13 @@ Replace `default` with your target data space name.
 If metadata has not changed significantly and you only want to regenerate doc output:
 
 ```bash
-python -u scripts/fill_dc1_live.py --space <DATA_SPACE_NAME>
+python -u scripts/fill_live.py --space <DATA_SPACE_NAME>
 ```
 
 ## C) One-shot orchestrated run (fetch + fill + reports)
 
 ```bash
-python -u scripts/dc1_run.py --clean-cache --spaces default --output-dir runs/latest/docs
+python -u scripts/run_pipeline.py --clean-cache --spaces default --output-dir runs/latest/docs
 ```
 
 This is useful for shareable run artifacts and audit trails.
@@ -285,28 +336,28 @@ This is useful for shareable run artifacts and audit trails.
 ## D) Optional all-spaces output from current cache
 
 ```bash
-python -u scripts/fill_dc1_live.py --all-spaces --output-dir runs/latest/docs
+python -u scripts/fill_live.py --all-spaces --output-dir runs/latest/docs
 ```
 
 ## Output Files and What They Mean
 
-### Generated DC1 document
+### Generated analysis document
 
 Example pattern:
 
-- `DC1_Data_Space_Analysis_Record_<space>_LIVE_<orgId>_<yyyymmdd>.docx`
+- `DataCloud_DataSpace_Analysis_Record_<space>_LIVE_<orgId>_<yyyymmdd>.docx`
 
 This is the primary artifact you share with architects/stakeholders.
 
 ### Cache directory
 
-- `.dc1-cache/`
+- `.data-space-analysis-cache/`
 
 Contains raw fetched metadata JSON snapshots used to populate the template.
 
 ### Orchestrator run artifacts
 
-When using `dc1_run.py`, you also get:
+When using `run_pipeline.py`, you also get:
 
 - `runs/<timestamp>/manifest.json` - machine-readable run metadata
 - `runs/<timestamp>/report.md` - human-readable run summary
@@ -407,31 +458,31 @@ Open:
 ### Partial or sparse sections in document
 
 - Some columns are intentionally manual/human-review fields
-- Use the pipeline appendices and `DC1_RECORD_PIPELINE.md` guidance to complete manual parts
+- Use the pipeline appendices and `DATA_SPACE_ANALYSIS_PIPELINE.md` guidance to complete manual parts
 
 ### Template/path issues
 
-- Ensure the expected DC1 template file exists at configured location
+- Ensure the expected analysis template file exists at configured location
 - Avoid renaming template without updating script expectations
 
 ## Security and Operational Notes
 
 - Do not commit org-sensitive cache or run outputs unless explicitly required by your process.
-- Keep `.dc1-cache/` and `runs/` ignored in git.
+- Keep `.data-space-analysis-cache/` and `runs/` ignored in git.
 - Prefer least-privilege org users with required read access.
 - Review generated documents before distribution (four-eyes review is recommended).
 
 ## Repository Structure
 
-- `DC1_RECORD_PIPELINE.md` - detailed pipeline design and section mapping
-- `scripts/dc1_fetch_live.py` - optimized fetcher
-- `scripts/fill_dc1_live.py` - DC1 template filler
-- `scripts/dc1_run.py` - orchestrator with reports
-- `scripts/dc1_cache_summary.py` - cache summary helper
-- `scripts/dc1_audit.py` - output document audit helper
+- `DATA_SPACE_ANALYSIS_PIPELINE.md` - detailed pipeline design and section mapping
+- `scripts/fetch_live.py` - optimized fetcher entrypoint
+- `scripts/fill_live.py` - analysis template fill entrypoint
+- `scripts/run_pipeline.py` - orchestrator entrypoint with reports
+- `scripts/cache_summary.py` - cache summary helper
+- `scripts/audit_output.py` - output document audit helper
 
 ## Additional Documentation
 
 For full technical details, section-by-section fill behavior, endpoint notes, timing guidance, and manual intervention matrix, see:
 
-- `DC1_RECORD_PIPELINE.md`
+- `DATA_SPACE_ANALYSIS_PIPELINE.md`

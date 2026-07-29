@@ -1,4 +1,4 @@
-"""Fetch every Data Cloud metadata endpoint the DC1 record needs, into a JSON cache.
+"""Fetch every Data Cloud metadata endpoint needed for the analysis record into a JSON cache.
 
 One command, one pass. Auth comes from the Salesforce CLI default org
 (`sf org display --json`), so the cache always belongs to whichever org the CLI is
@@ -55,7 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 API = "v63.0"
-CACHE = Path(__file__).resolve().parent.parent / ".dc1-cache"
+CACHE = Path(__file__).resolve().parent.parent / ".data-space-analysis-cache"
 PAGE = 200
 MAX_PAGES = 60
 WORKERS = 8
@@ -411,13 +411,13 @@ def main() -> None:
     global WORKERS
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
-        description="Fetch Data Cloud metadata into cache for DC1 generation."
+        description="Fetch Data Cloud metadata into cache for analysis generation."
     )
     parser.add_argument("--all-connectors", action="store_true", help="Probe all connector types from ssot/connectors.")
     parser.add_argument("--workers", type=int, default=WORKERS, help="Max parallel workers (default: 8).")
     parser.add_argument("--max-retries", type=int, default=MAX_RETRIES, help="Retries for 429/5xx/network errors.")
     parser.add_argument("--retry-base-ms", type=int, default=RETRY_BASE_MS, help="Base backoff in milliseconds.")
-    parser.add_argument("--clean-cache", action="store_true", help="Delete existing .dc1-cache/*.json before fetching.")
+    parser.add_argument("--clean-cache", action="store_true", help="Delete existing cache JSON files before fetching.")
     parser.add_argument(
         "--adaptive-throttle",
         action=argparse.BooleanOptionalAction,

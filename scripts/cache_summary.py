@@ -1,4 +1,4 @@
-"""Print what landed in the DC1 live cache: status, list key and record count."""
+"""Print what landed in the live metadata cache: status, list key and record count."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-CACHE = Path(__file__).resolve().parent.parent / ".dc1-cache"
+CACHE = Path(__file__).resolve().parent.parent / ".data-space-analysis-cache"
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-"""Audit a filled DC1 record: per-column fill stats plus a couple of sample rows."""
+"""Audit a filled analysis record: per-column fill stats plus sample rows."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-"""Fill the DC1 Data Space Analysis Record from the live cache in .dc1-cache.
+"""Fill the Data Cloud Data Space Analysis Record from the live cache.
 
-Run scripts/dc1_fetch_live.py first. Nothing in here is hand-typed org data: every
+Run scripts/fetch_live.py first. Nothing in here is hand-typed org data: every
 cell traces to a cached endpoint response.
 
 Conventions
@@ -24,8 +24,8 @@ from pathlib import Path
 import docx
 
 REPO = Path(__file__).resolve().parent.parent
-CACHE = REPO / ".dc1-cache"
-TEMPLATE = REPO / "DC1_Data_Space_Analysis_Record_TEMPLATE.docx"
+CACHE = REPO / ".data-space-analysis-cache"
+TEMPLATE = REPO / "DataCloud_DataSpace_Analysis_Record_TEMPLATE.docx"
 
 NA = "NOT AVAILABLE FROM API"
 NONE_DETECTED = "none detected"
@@ -258,7 +258,7 @@ HUMAN_INPUTS = [
     ("2.1", "Full-refresh duration (h)", "Not exposed by the API", "Time a full refresh in the source org, or read Data Cloud job history in the UI", "No"),
     ("2.1", "Migrate? / Rebuild path", "Migration decision", "Disposition workshop", "Yes"),
     ("2.2", "Owning team", "Not held in Data Cloud", "Connection owner from the CMDB or platform team", "No"),
-    ("2.2", "Connection exists in DC1? / New setup required?", "Target-org fact", "Run the same extract against DC1", "Yes"),
+    ("2.2", "Connection exists in target org? / New setup required?", "Target-org fact", "Run the same extract against the target org", "Yes"),
     ("2.3", "Historical data and backfill", "Source-system fact", "Source system owner plus decision D12", "Yes"),
     ("3.1", "Partitioning", "Not exposed by the API", "Data Cloud UI, DLO detail page", "No"),
     ("3.2", "Data-quality observations", "Needs profiling", "Stage-2 profiling workbook", "Yes"),
@@ -428,7 +428,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             api,
             f"Data space filter is applied: {filt}",
             "A filter that is not reproduced in the target changes every downstream row count",
-            "Confirm the filter is intentional and reproduce it in DC1",
+            "Confirm the filter is intentional and reproduce it in the target org",
         )
 
     # ---------- 2.1 Stream inventory (t10)
@@ -475,7 +475,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 label,
                 "No incremental key, so the stream can only full-refresh",
                 "Full refresh drives cutover duration and source-system load",
-                "Check whether an incremental key can be added in DC1",
+                "Check whether an incremental key can be added in the target org",
             )
         if s.get("dataAccessMode") == "DIRECT_ACCESS":
             flag(
@@ -483,7 +483,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 label,
                 "Zero-copy stream (dataAccessMode DIRECT_ACCESS)",
                 "Zero-copy objects are not migrated like ingested ones; the external share must exist first",
-                "Plan the external grant in DC1 before deploying dependent objects",
+                "Plan the external grant in the target org before deploying dependent objects",
             )
         if PROVISIONAL_LABEL.search(label):
             flag(
@@ -787,7 +787,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 label,
                 "Does not run automatically",
                 "A manually run ruleset produces profile counts that drift from reality",
-                "Confirm the intended schedule in DC1",
+                "Confirm the intended schedule in the target org",
             )
         if rs.get("lastJobStatus") not in (None, "SUCCESS", "Success"):
             flag(
@@ -1028,7 +1028,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 nm,
                 "Publish interval is NO_REFRESH",
                 "The segment is not being refreshed, so downstream activations serve a frozen audience",
-                "Confirm the intended cadence in DC1",
+                "Confirm the intended cadence in the target org",
             )
         if PROVISIONAL_LABEL.search(nm):
             flag(
@@ -1263,7 +1263,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
 
     # ---------- 12.6 Evidence pack (t51)
     cache_files = sorted(p.name for p in CACHE.glob("*.json"))
-    put(t[51], 1, 1, f".dc1-cache/ ({len(cache_files)} JSON responses, one per endpoint)")
+    put(t[51], 1, 1, f".data-space-analysis-cache/ ({len(cache_files)} JSON responses, one per endpoint)")
     put(t[51], 1, 3, "1")
     put(t[51], 1, 4, extract_date)
     put(t[51], 5, 1, ", ".join(cache_files))
@@ -1375,7 +1375,7 @@ def main() -> None:
 
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
-        description="Generate a DC1 document for one specific data space."
+        description="Generate an analysis document for one specific data space."
     )
     parser.add_argument(
         "--space",
@@ -1404,7 +1404,7 @@ def main() -> None:
     for target in targets:
         safe_space = re.sub(r"[^A-Za-z0-9_.-]+", "_", target)
         out = out_dir / (
-            f"DC1_Data_Space_Analysis_Record_{safe_space}_LIVE_{org}_"
+            f"DataCloud_DataSpace_Analysis_Record_{safe_space}_LIVE_{org}_"
             f"{date.today().strftime('%Y%m%d')}.docx"
         )
         doc = docx.Document(str(TEMPLATE))

@@ -19,11 +19,11 @@ from openpyxl import Workbook
 from starlette.requests import Request
 
 REPO = Path(__file__).resolve().parent
-CACHE = REPO / ".dc1-cache"
+CACHE = REPO / ".data-space-analysis-cache"
 RUNS = REPO / "runs" / "web"
 SCRIPTS = REPO / "scripts"
-FETCH_SCRIPT = SCRIPTS / "dc1_fetch_live.py"
-FILL_SCRIPT = SCRIPTS / "fill_dc1_live.py"
+FETCH_SCRIPT = SCRIPTS / "fetch_live.py"
+FILL_SCRIPT = SCRIPTS / "fill_live.py"
 
 app = FastAPI(title="Data Cloud Data Space Analysis Launcher")
 templates = Jinja2Templates(directory=str(REPO / "templates"))
@@ -80,7 +80,7 @@ def read_org_context() -> dict:
 
 
 def check_preflight() -> dict:
-    template_path = REPO / "DC1_Data_Space_Analysis_Record_TEMPLATE.docx"
+    template_path = REPO / "DataCloud_DataSpace_Analysis_Record_TEMPLATE.docx"
     checks = {
         "templateExists": template_path.exists(),
         "fetchScriptExists": FETCH_SCRIPT.exists(),
@@ -278,7 +278,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             if rc != 0:
                 raise RuntimeError("Fill step failed. See logs.")
 
-            out_candidates = sorted(docs_dir.glob(f"DC1_Data_Space_Analysis_Record_{safe_space}_LIVE_*.docx"))
+            out_candidates = sorted(docs_dir.glob(f"DataCloud_DataSpace_Analysis_Record_{safe_space}_LIVE_*.docx"))
             output_file = str(out_candidates[-1]) if out_candidates else None
             if output_file:
                 source = Path(output_file)
