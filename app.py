@@ -210,7 +210,8 @@ def start_run(space: str, fresh_fetch: bool) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Use keyword arguments for compatibility across Starlette template APIs.
+    return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
 @app.get("/api/preflight")
