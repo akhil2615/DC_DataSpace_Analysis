@@ -200,9 +200,9 @@
           <ol>
             <li>Run the setup script for your operating system.</li>
             <li>Start this launcher (`python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`).</li>
-            <li>Click <b>1) Check Setup</b>.</li>
-            <li>Click <b>2) Load Latest Data Spaces</b>.</li>
-            <li>Select one data space and click <b>3) Generate Analysis Files</b>.</li>
+            <li>Click <b>Check Setup</b>.</li>
+            <li>Click <b>Load Latest Data Spaces</b>.</li>
+            <li>Select one data space and click <b>Generate Analysis Files</b>.</li>
             <li>Download both outputs: analysis document and metadata workbook.</li>
           </ol>
         </div>
@@ -225,8 +225,8 @@
     <section class="card">
       <h2>Run Controls</h2>
       <div class="row">
-        <button id="btnPreflight" class="btn">1) Check Setup</button>
-        <button id="btnRefreshSpaces" class="btn">2) Load Latest Data Spaces</button>
+        <button id="btnPreflight" class="btn">Check Setup</button>
+        <button id="btnRefreshSpaces" class="btn">Load Latest Data Spaces</button>
         <span id="preflightBadge" class="pill">Not checked</span>
       </div>
       <div class="muted">Step 1 checks your login, template, and required files. Step 2 updates the list of available data spaces from your org.</div>
@@ -238,7 +238,7 @@
         <label><input type="checkbox" id="freshFetch" checked /> Pull latest metadata before generating document (recommended)</label>
       </div>
       <div class="row">
-        <button id="btnRun" class="btn btn-primary">3) Generate Analysis Files</button>
+        <button id="btnRun" class="btn btn-primary">Generate Analysis Files</button>
       </div>
       <div class="muted">When enabled, the app gets latest metadata first, then creates the document and workbook. Turn it off only if you want to reuse existing cached data.</div>
     </section>
