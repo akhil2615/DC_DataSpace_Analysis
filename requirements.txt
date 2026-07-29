@@ -1,0 +1,4 @@
+python-docx
+fastapi
+uvicorn
+jinja2

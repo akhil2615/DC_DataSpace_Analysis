@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DC1 Data Space Analysis Launcher</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #1f2937; }
+    h1 { margin-bottom: 6px; }
+    .muted { color: #4b5563; margin-top: 0; }
+    .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    label { display: block; margin-bottom: 6px; font-weight: 600; }
+    select, button { font-size: 14px; padding: 8px 10px; }
+    select { min-width: 340px; }
+    button { cursor: pointer; margin-right: 8px; }
+    .row { margin-bottom: 12px; }
+    #status { white-space: pre-wrap; background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; }
+    #logs { background: #111827; color: #f9fafb; padding: 10px; border-radius: 8px; max-height: 340px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
+    .ok { color: #065f46; }
+    .bad { color: #991b1b; }
+  </style>
+</head>
+<body>
+  <h1>DC1 Data Space Analysis Launcher</h1>
+  <p class="muted">Select a data space, run fetch + fill, and download the generated DC1 document.</p>
+
+  <div class="card">
+    <div class="row">
+      <button id="btnPreflight">Run Preflight</button>
+      <button id="btnRefreshSpaces">Refresh Spaces (fetch cache)</button>
+      <span id="preflightResult"></span>
+    </div>
+    <div class="row">
+      <label for="spaceSelect">Data Space</label>
+      <select id="spaceSelect"></select>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="freshFetch" checked /> Run fresh fetch before fill</label>
+    </div>
+    <div class="row">
+      <button id="btnRun">Generate DC1 Document</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Run Status</h3>
+    <div id="status">No run started.</div>
+    <p id="download"></p>
+  </div>
+
+  <div class="card">
+    <h3>Live Logs</h3>
+    <div id="logs">(logs will appear here)</div>
+  </div>
+
+  <script>
+    let activeRunId = null;
+    let pollTimer = null;
+
+    function setStatus(text) {
+      document.getElementById("status").textContent = text;
+    }
+
+    async function getJson(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || ("Request failed: " + res.status));
+      }
+      return res.json();
+    }
+
+    async function loadSpaces() {
+      const data = await getJson("/api/spaces");
+      const sel = document.getElementById("spaceSelect");
+      sel.innerHTML = "";
+      for (const space of data.spaces) {
+        const opt = document.createElement("option");
+        opt.value = space;
+        opt.textContent = space;
+        sel.appendChild(opt);
+      }
+      if (data.count === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No spaces in cache. Click 'Refresh Spaces'.";
+        sel.appendChild(opt);
+      }
+    }
+
+    async function runPreflight() {
+      const data = await getJson("/api/preflight");
+      const checks = data.checks || {};
+      const ok = Object.values(checks).every(Boolean);
+      const org = data.org || {};
+      const el = document.getElementById("preflightResult");
+      if (ok) {
+        el.className = "ok";
+        el.textContent = `OK | org=${org.orgId || "unknown"} | user=${org.username || "unknown"}`;
+      } else {
+        el.className = "bad";
+        el.textContent = "Preflight failed. Check status panel.";
+      }
+      setStatus(JSON.stringify(data, null, 2));
+    }
+
+    async function refreshSpaces() {
+      setStatus("Refreshing spaces from live org...");
+      const data = await getJson("/api/spaces/refresh", { method: "POST" });
+      await loadSpaces();
+      setStatus(`Spaces refreshed. Count=${(data.spaces || []).length}`);
+    }
+
+    function renderRun(run) {
+      const status = [
+        `Run ID: ${run.id}`,
+        `Space: ${run.space}`,
+        `Fresh Fetch: ${run.freshFetch}`,
+        `Status: ${run.status}`,
+        `Step: ${run.step}`,
+        `Started: ${run.startedAtUtc}`,
+        `Finished: ${run.finishedAtUtc || "-"}`,
+        `Error: ${run.error || "-"}`,
+      ].join("\n");
+      setStatus(status);
+
+      const logs = (run.logs || []).join("\n");
+      document.getElementById("logs").textContent = logs || "(no logs yet)";
+
+      const dl = document.getElementById("download");
+      if (run.status === "completed" && run.outputFile) {
+        dl.innerHTML = `<a href="/api/runs/${run.id}/download">Download generated document</a>`;
+      } else {
+        dl.innerHTML = "";
+      }
+    }
+
+    async function pollRun() {
+      if (!activeRunId) return;
+      try {
+        const run = await getJson(`/api/runs/${activeRunId}`);
+        renderRun(run);
+        if (run.status === "completed" || run.status === "failed") {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      } catch (err) {
+        setStatus("Polling failed: " + err.message);
+      }
+    }
+
+    async function startRun() {
+      const space = document.getElementById("spaceSelect").value.trim();
+      const freshFetch = document.getElementById("freshFetch").checked;
+      if (!space) {
+        setStatus("Please select a valid data space.");
+        return;
+      }
+      const body = JSON.stringify({ space, freshFetch });
+      const data = await getJson("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      activeRunId = data.runId;
+      setStatus(`Run started: ${activeRunId}`);
+      document.getElementById("logs").textContent = "(collecting logs...)";
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(pollRun, 2000);
+      await pollRun();
+    }
+
+    document.getElementById("btnPreflight").addEventListener("click", async () => {
+      try { await runPreflight(); } catch (err) { setStatus(err.message); }
+    });
+    document.getElementById("btnRefreshSpaces").addEventListener("click", async () => {
+      try { await refreshSpaces(); } catch (err) { setStatus(err.message); }
+    });
+    document.getElementById("btnRun").addEventListener("click", async () => {
+      try { await startRun(); } catch (err) { setStatus(err.message); }
+    });
+
+    loadSpaces().catch(err => setStatus(err.message));
+  </script>
+</body>
+</html>

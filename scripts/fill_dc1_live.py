@@ -25,7 +25,7 @@ import docx
 
 REPO = Path(__file__).resolve().parent.parent
 CACHE = REPO / ".dc1-cache"
-TEMPLATE = Path(r"C:\Users\cakhil\Downloads\DC1_Data_Space_Analysis_Record_TEMPLATE.docx")
+TEMPLATE = REPO / "DC1_Data_Space_Analysis_Record_TEMPLATE.docx"
 
 NA = "NOT AVAILABLE FROM API"
 NONE_DETECTED = "none detected"

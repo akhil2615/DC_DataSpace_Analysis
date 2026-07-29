@@ -14,6 +14,7 @@ This repository is focused on the DC1 automated fill pipeline only. It does not 
 - Why This Uses CLI User Context (Not MCP)
 - Data Space Selection
 - How to Run
+- Local Web Launcher (Dropdown UI)
 - Output Files and What They Mean
 - Recommended Run Patterns
 - Troubleshooting
@@ -134,6 +135,12 @@ If you need to install manually, ensure at least:
 
 ```bash
 pip install python-docx
+```
+
+For the local web launcher, install:
+
+```bash
+pip install -r requirements.txt
 ```
 
 ### 4) Confirm scripts are discoverable
@@ -305,6 +312,35 @@ When using `dc1_run.py`, you also get:
 - `runs/<timestamp>/report.md` - human-readable run summary
 - `runs/<timestamp>/report.csv` - tabular run summary
 - `runs/<timestamp>/*.log` - execution logs
+
+## Local Web Launcher (Dropdown UI)
+
+The repository now includes a lightweight local web app so users can select a data space from a dropdown and run the pipeline without typing full commands.
+
+### Start the web app
+
+```bash
+uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Open:
+
+- [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+### UI workflow
+
+1. Click **Run Preflight** to validate template, scripts, and CLI auth.
+2. Click **Refresh Spaces** to fetch latest metadata and load space list.
+3. Select the target data space from dropdown.
+4. Keep **Run fresh fetch** enabled for a full current run (recommended).
+5. Click **Generate DC1 Document**.
+6. Watch live logs and download the generated `.docx` when complete.
+
+### Web-run artifacts
+
+- UI-driven runs are written under `runs/web/<run-id>/docs/`.
+- The generated file name pattern remains:
+  - `DC1_Data_Space_Analysis_Record_<space>_LIVE_<orgId>_<yyyymmdd>.docx`
 
 ## Recommended Run Patterns
 
