@@ -6,7 +6,25 @@ This repository is focused on the automated Data Cloud Data Space Analysis pipel
 
 ## Start Here (First-Time Setup)
 
-Run this once on a new machine before opening the local launcher.
+First, you need the project files on your machine. Choose one option:
+
+### Option A - Clone with Git (recommended)
+
+Windows / macOS / Linux:
+
+```bash
+git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
+cd DC_DataSpace_Analysis
+```
+
+### Option B - Download ZIP (no Git required)
+
+1. Open the repository page in your browser.  
+2. Click **Code** -> **Download ZIP**.  
+3. Extract the ZIP.  
+4. Open terminal in the extracted project folder.
+
+Then run setup + launcher commands below.
 
 Windows (PowerShell):
 
