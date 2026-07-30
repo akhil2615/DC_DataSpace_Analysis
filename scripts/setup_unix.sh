@@ -36,6 +36,9 @@ step "Installing Python dependencies"
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 
+step "Preparing cache directory"
+mkdir -p .data-space-analysis-cache
+
 step "Checking Salesforce CLI authentication"
 if ! sf org display --json >/dev/null 2>&1; then
   echo "Salesforce CLI is installed, but no active org login was found."

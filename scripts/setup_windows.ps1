@@ -52,6 +52,11 @@ Write-Step "Installing Python dependencies"
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
 & ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
 
+Write-Step "Preparing cache directory"
+if (-not (Test-Path ".data-space-analysis-cache")) {
+    New-Item -ItemType Directory -Path ".data-space-analysis-cache" | Out-Null
+}
+
 if (-not $SkipSfAuthCheck) {
     Write-Step "Checking Salesforce CLI authentication"
     sf org display --json | Out-Null

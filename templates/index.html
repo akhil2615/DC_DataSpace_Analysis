@@ -234,20 +234,29 @@
     async function runPreflight() {
       const data = await getJson("/api/preflight");
       const checks = data.checks || {};
-      const ok = Object.values(checks).every(Boolean);
+      const requiredOk = Boolean(checks.templateExists) && Boolean(checks.fetchScriptExists) && Boolean(checks.fillScriptExists) && Boolean(checks.cliAuthenticated);
+      const cacheReady = Boolean(checks.cacheExists);
       const org = data.org || {};
-      if (ok) {
-        setPreflightBadge(true, "Setup Ready");
+      if (requiredOk) {
+        if (cacheReady) {
+          setPreflightBadge(true, "Setup Ready");
+          setStatusMessage("Setup is ready. You can generate files now.");
+        } else {
+          setPreflightBadge(true, "Setup Ready (Data not loaded)");
+          setStatusMessage("Setup is ready. Next step: click 'Load Latest Data Spaces' to fetch metadata and initialize cache.");
+        }
       } else {
         setPreflightBadge(false, "Setup Needs Attention");
+        setStatusMessage("Setup has missing requirements. Review details below.");
       }
-      setStatusMessage(JSON.stringify({
+      const detail = JSON.stringify({
         checks,
         orgId: org.orgId || null,
         username: org.username || null,
         instanceUrl: org.instanceUrl || null,
         orgError: org.error || null
-      }, null, 2));
+      }, null, 2);
+      document.getElementById("statusMessage").textContent += "\n\n" + detail;
     }
 
     async function refreshSpaces() {
