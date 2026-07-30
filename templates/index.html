@@ -301,6 +301,12 @@
         xlsxLink.textContent = "Download Metadata Workbook (.xlsx, multiple tabs)";
         d.appendChild(xlsxLink);
       }
+      if (run.status === "completed" && run.erdFile) {
+        const erdLink = document.createElement("a");
+        erdLink.href = `/api/runs/${run.id}/download-erd`;
+        erdLink.textContent = "Download Lucid ERD JSON (.json)";
+        d.appendChild(erdLink);
+      }
       setStatusMessage(JSON.stringify(run, null, 2));
     }
 

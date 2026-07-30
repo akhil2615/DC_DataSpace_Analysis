@@ -102,6 +102,16 @@ def append_log(run_id: str, line: str) -> None:
             run["logs"] = run["logs"][-1000:]
 
 
+def load_cache_json(name: str) -> dict:
+    p = CACHE / f"{name}.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+
+
 def excel_safe_sheet_name(name: str, used: set[str]) -> str:
     cleaned = re.sub(r"[:\\/*?\[\]]", "_", name).strip() or "Sheet"
     base = cleaned[:31]
@@ -181,6 +191,153 @@ def build_cache_workbook(run_id: str, space: str, run_dir: Path) -> Path:
     return out
 
 
+def _new_lucid_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+def _cardinality_style(cardinality: str | None) -> tuple[str, str]:
+    c = (cardinality or "").upper()
+    if c in ("ONETOONE",):
+        return "CFN ERD Exactly One Arrow", "CFN ERD Exactly One Arrow"
+    if c in ("ONETON",):
+        return "CFN ERD Exactly One Arrow", "CFN ERD Zero Or More Arrow"
+    if c in ("NTOONE",):
+        return "CFN ERD Zero Or More Arrow", "CFN ERD Exactly One Arrow"
+    return "CFN ERD Zero Or More Arrow", "CFN ERD Zero Or More Arrow"
+
+
+def build_lucid_erd_json(run_id: str, space: str, run_dir: Path) -> Path:
+    streams = load_cache_json("data-streams").get("records", [])
+    metadata_dlo = load_cache_json("metadata-dlo").get("records", [])
+    metadata_dmo = load_cache_json("metadata-dmo").get("records", [])
+    dmo_mappings = load_cache_json("dmo-mappings").get("byDmo", {})
+    prov = load_cache_json("_provenance")
+
+    nodes: dict[str, tuple[str, str]] = {}  # apiName -> (type, label)
+    edges: list[tuple[str, str, str, str | None]] = []  # src, dst, label, cardinality
+
+    for s in streams:
+        s_name = s.get("name")
+        dlo = ((s.get("dataLakeObjectInfo") or {}).get("name"))
+        if not s_name:
+            continue
+        nodes[s_name] = ("Data Stream", s_name)
+        if dlo:
+            nodes[dlo] = ("DLO", dlo)
+            edges.append((s_name, dlo, "streams into", "NTOONE"))
+
+    for d in metadata_dlo:
+        name = d.get("name")
+        if name:
+            nodes.setdefault(name, ("DLO", name))
+
+    for d in metadata_dmo:
+        name = d.get("name")
+        display = d.get("displayName") or name
+        if name:
+            nodes.setdefault(name, ("DMO", str(display)))
+
+    for dmo_name, details in dmo_mappings.items():
+        body = (details or {}).get("body") or {}
+        for m in body.get("objectSourceTargetMaps") or []:
+            src = m.get("sourceEntityDeveloperName")
+            dst = m.get("targetEntityDeveloperName") or dmo_name
+            if src and dst:
+                nodes.setdefault(src, ("DLO", src))
+                nodes.setdefault(dst, ("DMO", dst))
+                edges.append((src, dst, "mapped to", "NTOONE"))
+
+    for d in metadata_dmo:
+        for rel in d.get("relationships") or []:
+            src = rel.get("fromEntity")
+            dst = rel.get("toEntity")
+            if src and dst:
+                nodes.setdefault(src, ("DMO", src))
+                nodes.setdefault(dst, ("DMO", dst))
+                edges.append((src, dst, "related to", rel.get("cardinality")))
+
+    # De-duplicate edges while preserving order
+    seen_edge: set[tuple[str, str, str, str | None]] = set()
+    unique_edges: list[tuple[str, str, str, str | None]] = []
+    for e in edges:
+        if e not in seen_edge:
+            seen_edge.add(e)
+            unique_edges.append(e)
+
+    shape_ids: dict[str, str] = {}
+    shapes: list[dict] = []
+    for api_name, (kind, label) in sorted(nodes.items(), key=lambda x: (x[1][0], x[0])):
+        sid = _new_lucid_id("shape")
+        shape_ids[api_name] = sid
+        shapes.append(
+            {
+                "id": sid,
+                "class": "SFACard",
+                "textAreas": [
+                    {
+                        "label": "t_header",
+                        "text": f"{kind}\u2028{label}",
+                    }
+                ],
+                "customData": [],
+                "linkedData": [],
+            }
+        )
+
+    lines: list[dict] = []
+    for src, dst, label, cardinality in unique_edges:
+        src_id = shape_ids.get(src)
+        dst_id = shape_ids.get(dst)
+        if not src_id or not dst_id:
+            continue
+        e1_style, e2_style = _cardinality_style(cardinality)
+        lines.append(
+            {
+                "id": _new_lucid_id("line"),
+                "endpoint1": {"style": e1_style, "connectedTo": src_id},
+                "endpoint2": {"style": e2_style, "connectedTo": dst_id},
+                "textAreas": [{"label": "t0", "text": label}],
+                "customData": [],
+                "linkedData": [],
+            }
+        )
+
+    chart = {
+        "id": _new_lucid_id("doc"),
+        "title": f"Data Cloud Data Model ERD - {space}",
+        "product": "lucidchart",
+        "pages": [
+            {
+                "id": _new_lucid_id("page"),
+                "title": "Data Cloud ERD",
+                "index": 0,
+                "items": {
+                    "shapes": shapes,
+                    "lines": lines,
+                    "groups": [],
+                    "layers": [],
+                },
+                "customData": [],
+                "linkedData": [],
+            }
+        ],
+        "data": {"collections": []},
+        "accountId": 0,
+        "metadata": {
+            "runId": run_id,
+            "space": space,
+            "orgId": prov.get("orgId"),
+            "generatedAtUtc": now_utc(),
+            "nodeCount": len(shapes),
+            "edgeCount": len(lines),
+        },
+    }
+
+    out = run_dir / f"DataCloud_DataSpace_ERD_{space}_{run_id}.json"
+    out.write_text(json.dumps(chart, indent=2), encoding="utf-8")
+    return out
+
+
 def run_command(run_id: str, step: str, cmd: list[str]) -> int:
     with _lock:
         _runs[run_id]["step"] = step
@@ -229,6 +386,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             "finishedAtUtc": None,
             "outputFile": None,
             "workbookFile": None,
+            "erdFile": None,
             "runDir": str(run_dir),
             "error": None,
         }
@@ -286,6 +444,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 shutil.copy2(source, renamed)
                 output_file = str(renamed)
             workbook_file = str(build_cache_workbook(run_id=run_id, space=safe_space, run_dir=run_dir))
+            erd_file = str(build_lucid_erd_json(run_id=run_id, space=safe_space, run_dir=run_dir))
 
             with _lock:
                 run = _runs[run_id]
@@ -294,6 +453,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 run["finishedAtUtc"] = now_utc()
                 run["outputFile"] = output_file
                 run["workbookFile"] = workbook_file
+                run["erdFile"] = erd_file
                 if not output_file:
                     run["error"] = "Run finished but output file was not found."
                     run["status"] = "failed"
@@ -416,3 +576,18 @@ def api_run_download_workbook(run_id: str):
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+@app.get("/api/runs/{run_id}/download-erd")
+def api_run_download_erd(run_id: str):
+    with _lock:
+        run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    erd_file = run.get("erdFile")
+    if not erd_file:
+        raise HTTPException(status_code=404, detail="No ERD file for this run")
+    path = Path(erd_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="ERD file path no longer exists")
+    return FileResponse(path, filename=path.name, media_type="application/json")
