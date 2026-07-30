@@ -58,9 +58,50 @@ sf config set target-org my-org --global
 sf org display --json
 ```
 
-Then start launcher again with the same uvicorn command.
+Then start launcher again using these exact commands:
 
-If setup fails with `No supported Python found`, install Python 3.10+ first (for example `brew install python@3.11`), then rerun setup.
+Windows (PowerShell):
+
+```bash
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+macOS / Linux:
+
+```bash
+.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+If setup fails with `No supported Python found`, follow these detailed recovery steps:
+
+macOS / Linux:
+
+```bash
+# 1) Install a supported Python version
+brew install python@3.11
+
+# 2) Verify it is available
+python3.11 --version
+
+# 3) Re-run setup
+./scripts/setup_unix.sh
+
+# 4) Start launcher
+.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Windows:
+
+```bash
+# 1) Install Python 3.10+ (winget option)
+winget install Python.Python.3.12
+
+# 2) Open a new PowerShell window, then re-run setup
+powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
+
+# 3) Start launcher
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
 
 Then open:
 
