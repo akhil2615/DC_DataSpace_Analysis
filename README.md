@@ -31,6 +31,11 @@ macOS / Linux:
 ```bash
 chmod +x scripts/setup_unix.sh
 ./scripts/setup_unix.sh
+```
+
+Only after setup completes successfully:
+
+```bash
 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -43,6 +48,8 @@ sf org display --json
 ```
 
 Then start launcher again with the same uvicorn command.
+
+If setup fails with `No supported Python found`, install Python 3.10+ first (for example `brew install python@3.11`), then rerun setup.
 
 Then open:
 

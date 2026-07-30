@@ -27,9 +27,11 @@ fi
 
 step "Selecting Python interpreter (3.10+ required)"
 PYTHON_BIN=""
+detected=()
 for candidate in python3.12 python3.11 python3.10 python3; do
   if command -v "$candidate" >/dev/null 2>&1; then
     py_ver="$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    detected+=("$candidate:$py_ver")
     py_major="${py_ver%%.*}"
     py_minor="${py_ver##*.}"
     if [ "$py_major" -gt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -ge 10 ]; }; then
@@ -40,8 +42,25 @@ for candidate in python3.12 python3.11 python3.10 python3; do
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-  echo "No supported Python found. Install Python 3.10+ and ensure it is available as python3.10, python3.11, python3.12, or python3."
-  echo "Install: https://www.python.org/downloads/"
+  echo "No supported Python found."
+  if [ "${#detected[@]}" -gt 0 ]; then
+    echo "Detected Python commands:"
+    for entry in "${detected[@]}"; do
+      echo "  - $entry"
+    done
+  else
+    echo "No python3 command variants were detected in PATH."
+  fi
+  echo
+  echo "Install Python 3.10+ then rerun this script."
+  echo "macOS quick options:"
+  echo "  - Homebrew: brew install python@3.11"
+  echo "  - python.org: https://www.python.org/downloads/"
+  echo
+  echo "After install, verify with:"
+  echo "  python3.11 --version    # or python3.10 --version"
+  echo
+  echo "Important: do NOT run the uvicorn command until setup completes successfully."
   exit 1
 fi
 echo "Using $PYTHON_BIN"
