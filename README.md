@@ -116,8 +116,6 @@ Then open:
 5. Download both files:
    - Analysis document (`.docx`)
    - Metadata workbook (`.xlsx`)
-   - Visio ERD (`.vsdx`) for Lucid direct import
-   - Draw.io ERD (`.drawio`) for alternate diagram import
 
 If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
 
@@ -526,8 +524,6 @@ Open:
 6. Watch live logs and download both outputs when complete:
    - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
-   - Visio ERD (`.vsdx`) generated from DMO inventory and DMO-to-DMO relationships
-   - Draw.io ERD (`.drawio`) generated from the same relationship graph
 
 Tip: use the **Start Here (First-Time Setup)** section in this README for new-user onboarding before opening the launcher.
 
@@ -539,10 +535,6 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
   - `DataCloud_DataSpace_Analysis_Record_<space>_<run-id>.docx`
 - Workbook bundle pattern:
   - `DataCloud_DataSpace_Metadata_Bundle_<space>_<run-id>.xlsx`
-- Visio ERD pattern:
-  - `DataCloud_DataSpace_ERD_<space>_<run-id>.vsdx`
-- Draw.io ERD pattern:
-  - `DataCloud_DataSpace_ERD_<space>_<run-id>.drawio`
 - Workbook contents:
   - `Summary` tab with run metadata and cache file index
   - one or more tabs per cache file (records and raw JSON views)

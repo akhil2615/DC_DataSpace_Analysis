@@ -301,24 +301,6 @@
         xlsxLink.textContent = "Download Metadata Workbook (.xlsx, multiple tabs)";
         d.appendChild(xlsxLink);
       }
-      if (run.status === "completed" && run.erdFile) {
-        const erdLink = document.createElement("a");
-        erdLink.href = `/api/runs/${run.id}/download-erd`;
-        erdLink.textContent = "Download Lucid ERD JSON (.json)";
-        d.appendChild(erdLink);
-      }
-      if (run.status === "completed" && run.drawioFile) {
-        const drawioLink = document.createElement("a");
-        drawioLink.href = `/api/runs/${run.id}/download-drawio`;
-        drawioLink.textContent = "Download Draw.io ERD (.drawio)";
-        d.appendChild(drawioLink);
-      }
-      if (run.status === "completed" && run.vsdxFile) {
-        const vsdxLink = document.createElement("a");
-        vsdxLink.href = `/api/runs/${run.id}/download-vsdx`;
-        vsdxLink.textContent = "Download Visio ERD (.vsdx)";
-        d.appendChild(vsdxLink);
-      }
       setStatusMessage(JSON.stringify(run, null, 2));
     }
 
