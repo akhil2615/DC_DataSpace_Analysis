@@ -313,6 +313,12 @@
         drawioLink.textContent = "Download Draw.io ERD (.drawio)";
         d.appendChild(drawioLink);
       }
+      if (run.status === "completed" && run.vsdxFile) {
+        const vsdxLink = document.createElement("a");
+        vsdxLink.href = `/api/runs/${run.id}/download-vsdx`;
+        vsdxLink.textContent = "Download Visio ERD (.vsdx)";
+        d.appendChild(vsdxLink);
+      }
       setStatusMessage(JSON.stringify(run, null, 2));
     }
 

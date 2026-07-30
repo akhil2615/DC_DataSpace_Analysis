@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
 from starlette.requests import Request
+from vsdx import VisioFile
 
 REPO = Path(__file__).resolve().parent
 CACHE = REPO / ".data-space-analysis-cache"
@@ -25,6 +26,7 @@ RUNS = REPO / "runs" / "web"
 SCRIPTS = REPO / "scripts"
 FETCH_SCRIPT = SCRIPTS / "fetch_live.py"
 FILL_SCRIPT = SCRIPTS / "fill_live.py"
+VSDX_TEMPLATE = REPO / "DataCloud_Data_Model_ERDs_Template.vsdx"
 
 app = FastAPI(title="Data Cloud Data Space Analysis Launcher")
 templates = Jinja2Templates(directory=str(REPO / "templates"))
@@ -401,6 +403,89 @@ def build_drawio_erd_xml(run_id: str, space: str, run_dir: Path) -> Path:
     return out
 
 
+def build_vsdx_erd(run_id: str, space: str, run_dir: Path) -> Path:
+    if not VSDX_TEMPLATE.exists():
+        raise RuntimeError(f"VSDX template not found: {VSDX_TEMPLATE}")
+
+    metadata_dmo = load_cache_json("metadata-dmo").get("records", [])
+    nodes: dict[str, str] = {}  # api -> display
+    edges: list[tuple[str, str, str]] = []  # src, dst, label
+
+    for d in metadata_dmo:
+        name = d.get("name")
+        if not name:
+            continue
+        nodes[name] = d.get("displayName") or name
+        for rel in d.get("relationships") or []:
+            src = rel.get("fromEntity")
+            dst = rel.get("toEntity")
+            if not src or not dst:
+                continue
+            left = rel.get("fromEntityAttribute") or ""
+            right = rel.get("toEntityAttribute") or ""
+            card = rel.get("cardinality") or ""
+            label = " -> ".join([x for x in (left, right) if x]).strip()
+            if card:
+                label = f"{label} ({card})" if label else card
+            edges.append((src, dst, label or "related to"))
+            nodes.setdefault(src, src)
+            nodes.setdefault(dst, dst)
+
+    # Deduplicate edges
+    seen: set[tuple[str, str, str]] = set()
+    unique_edges: list[tuple[str, str, str]] = []
+    for e in edges:
+        if e not in seen:
+            seen.add(e)
+            unique_edges.append(e)
+
+    out = run_dir / f"DataCloud_DataSpace_ERD_{space}_{run_id}.vsdx"
+    shutil.copy2(VSDX_TEMPLATE, out)
+
+    with VisioFile(str(out)) as vis:
+        page = vis.get_page_by_name("Overview Model") or vis.pages[1]
+        proto_shape = next((s for s in page.child_shapes if s.master_page_ID is not None), None)
+        proto_line = next((s for s in page.child_shapes if s.begin_x is not None and s.end_x is not None), None)
+        if not proto_shape or not proto_line:
+            raise RuntimeError("Unable to locate shape/line prototypes in VSDX template.")
+
+        # Clear current page objects
+        for s in list(page.child_shapes):
+            s.remove()
+
+        # Layout DMOs in a grid
+        ordered = sorted(nodes.items(), key=lambda x: x[0])
+        cols = 5
+        x0, y0 = 2.0, 10.0
+        x_step, y_step = 2.6, 1.25
+        placed: dict[str, tuple[float, float, Any]] = {}
+
+        for idx, (api_name, display) in enumerate(ordered):
+            row = idx // cols
+            col = idx % cols
+            x = x0 + col * x_step
+            y = y0 - row * y_step
+            new_elem = vis.copy_shape(proto_shape.xml, page)
+            shp = page.find_shape_by_id(new_elem.attrib["ID"])
+            shp.text = f"{display}\u2028{api_name}"
+            shp.x, shp.y = x, y
+            placed[api_name] = (x, y, shp)
+
+        for src, dst, label in unique_edges:
+            if src not in placed or dst not in placed:
+                continue
+            new_elem = vis.copy_shape(proto_line.xml, page)
+            line = page.find_shape_by_id(new_elem.attrib["ID"])
+            line.text = label
+            x1, y1, _ = placed[src]
+            x2, y2, _ = placed[dst]
+            line.set_start_and_finish((x1, y1), (x2, y2))
+
+        vis.save_vsdx(str(out))
+
+    return out
+
+
 def run_command(run_id: str, step: str, cmd: list[str]) -> int:
     with _lock:
         _runs[run_id]["step"] = step
@@ -451,6 +536,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             "workbookFile": None,
             "erdFile": None,
             "drawioFile": None,
+            "vsdxFile": None,
             "runDir": str(run_dir),
             "error": None,
         }
@@ -510,6 +596,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             workbook_file = str(build_cache_workbook(run_id=run_id, space=safe_space, run_dir=run_dir))
             erd_file = str(build_lucid_erd_json(run_id=run_id, space=safe_space, run_dir=run_dir))
             drawio_file = str(build_drawio_erd_xml(run_id=run_id, space=safe_space, run_dir=run_dir))
+            vsdx_file = str(build_vsdx_erd(run_id=run_id, space=safe_space, run_dir=run_dir))
 
             with _lock:
                 run = _runs[run_id]
@@ -520,6 +607,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 run["workbookFile"] = workbook_file
                 run["erdFile"] = erd_file
                 run["drawioFile"] = drawio_file
+                run["vsdxFile"] = vsdx_file
                 if not output_file:
                     run["error"] = "Run finished but output file was not found."
                     run["status"] = "failed"
@@ -672,3 +760,18 @@ def api_run_download_drawio(run_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Draw.io file path no longer exists")
     return FileResponse(path, filename=path.name, media_type="application/xml")
+
+
+@app.get("/api/runs/{run_id}/download-vsdx")
+def api_run_download_vsdx(run_id: str):
+    with _lock:
+        run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    vsdx_file = run.get("vsdxFile")
+    if not vsdx_file:
+        raise HTTPException(status_code=404, detail="No VSDX file for this run")
+    path = Path(vsdx_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="VSDX file path no longer exists")
+    return FileResponse(path, filename=path.name, media_type="application/vnd.visio")
