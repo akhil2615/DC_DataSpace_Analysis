@@ -82,6 +82,7 @@ git pull
 - Local Web Launcher (Dropdown UI)
 - Output Files and What They Mean
 - Recommended Run Patterns
+- Common Scenarios and Fixes
 - Troubleshooting
 - Security and Operational Notes
 - Repository Structure
@@ -494,6 +495,75 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 1. Run orchestrator with `--clean-cache`
 2. Generate space outputs needed for the cycle
 3. Archive run folder for audit evidence
+
+## Common Scenarios and Fixes
+
+### 1) First-time setup on a new machine (recommended flow)
+
+1. Clone repo:
+   - `git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git`
+   - `cd DC_DataSpace_Analysis`
+2. Run setup script:
+   - Windows: `powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1`
+   - macOS/Linux: `chmod +x scripts/setup_unix.sh && ./scripts/setup_unix.sh`
+3. If prompted for Salesforce login:
+   - `sf org login web --alias my-org`
+   - `sf config set target-org my-org --global`
+   - `sf org display --json`
+4. Start launcher:
+   - Windows: `.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
+   - macOS/Linux: `.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
+
+### 2) Existing user wants latest fixes
+
+- From cloned repo folder:
+  - `git pull`
+- Restart launcher.
+
+### 3) `Check Setup` says `Setup Ready (Data not loaded)`
+
+- This is normal on first run.
+- Click **Load Latest Data Spaces**.
+
+### 4) Only `default` appears in dropdown
+
+- This usually means either:
+  - wrong target org is active, or
+  - current user can only see `default`.
+- Verify active org:
+  - `sf org display --json`
+- If wrong org, switch:
+  - `sf org list --all`
+  - `sf config set target-org <alias-or-username> --global`
+- Re-fetch:
+  - `python -u scripts/fetch_live.py --clean-cache --workers 4 --max-retries 2 --retry-base-ms 400 --adaptive-throttle`
+
+### 5) `Load Latest Data Spaces` returns zero spaces
+
+- Run these from repo root:
+  - `sf org display --json`
+  - `python -u scripts/fetch_live.py --clean-cache --workers 4 --max-retries 2 --retry-base-ms 400 --adaptive-throttle`
+  - `python -c "import json, pathlib; p=pathlib.Path('.data-space-analysis-cache/data-spaces.json'); d=json.loads(p.read_text()) if p.exists() else {}; print('count=',len(d.get('records',[])), 'names=', [r.get('name') for r in d.get('records',[])])"`
+- If `count=0`, check org/user visibility for data spaces.
+
+### 6) macOS/Linux setup fails with Python 3.9
+
+- Python 3.10+ is required.
+- Install newer Python (3.10/3.11/3.12), then rerun setup script.
+- The Unix setup script auto-selects compatible Python if available.
+
+### 7) `InvalidProjectWorkspaceError` when setting target org
+
+- Use global config in this non-SFDX folder:
+  - `sf config set target-org <alias> --global`
+
+### 8) `http://127.0.0.1:8000` not reachable
+
+- Server is not running or port differs.
+- Start launcher from repo root:
+  - `python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
+- If port busy, use:
+  - `python -m uvicorn app:app --host 127.0.0.1 --port 8010 --reload`
 
 ## Troubleshooting
 
