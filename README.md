@@ -8,9 +8,7 @@ This repository is focused on the automated Data Cloud Data Space Analysis pipel
 
 Use this exact flow for first-time setup. This is the primary onboarding path.
 
-### Step 0: Get project files (choose one)
-
-#### Option A - Clone with Git (recommended)
+### Step 0: Clone the repository
 
 Windows / macOS / Linux:
 
@@ -18,13 +16,6 @@ Windows / macOS / Linux:
 git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
 cd DC_DataSpace_Analysis
 ```
-
-#### Option B - Download ZIP (no Git required)
-
-1. Open the repository page in your browser.  
-2. Click **Code** -> **Download ZIP**.  
-3. Extract the ZIP.  
-4. Open terminal in the extracted project folder.
 
 ### Step 1: Run setup + start launcher
 
@@ -143,7 +134,7 @@ git --version
 
 Short answer: users still need some local prerequisites. The web page simplifies usage, but it does not remove machine setup.
 
-Use **Start Here (First-Time Setup)** for the fastest path (Git clone or ZIP download + setup commands). This section explains the reasoning and boundaries.
+Use **Start Here (First-Time Setup)** for the fastest path (Git clone + setup commands). This section explains the reasoning and boundaries.
 
 What the web launcher handles:
 
