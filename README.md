@@ -8,6 +8,8 @@ This repository is focused on the automated Data Cloud Data Space Analysis pipel
 
 Use this exact flow for first-time setup. This is the primary onboarding path.
 
+Estimated time: 5-10 minutes (if Python + Salesforce CLI are already installed).
+
 ### Step 0: Clone the repository
 
 Windows / macOS / Linux:
@@ -17,7 +19,30 @@ git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
 cd DC_DataSpace_Analysis
 ```
 
-### Step 1: Run setup + start launcher
+### Step 1 (recommended): One-command start
+
+Windows (PowerShell):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1
+```
+
+macOS / Linux:
+
+```bash
+chmod +x scripts/start_unix.sh scripts/setup_unix.sh
+./scripts/start_unix.sh
+```
+
+This command:
+
+- validates prerequisites
+- creates `.venv` (if needed)
+- installs dependencies
+- checks Salesforce CLI auth context
+- starts the launcher
+
+### Step 1 (manual alternative): Setup + run in two commands
 
 Windows (PowerShell):
 
@@ -74,6 +99,11 @@ From the cloned repo folder:
 ```bash
 git pull
 ```
+
+Then run the same one-command start:
+
+- Windows: `powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1`
+- macOS/Linux: `./scripts/start_unix.sh`
 
 ## Table of Contents
 
@@ -520,6 +550,11 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 4. Start launcher:
    - Windows: `.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
    - macOS/Linux: `.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
+
+Note: you can run this entire flow using the one-command starters:
+
+- Windows: `powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1`
+- macOS/Linux: `./scripts/start_unix.sh`
 
 ### 2) Existing user wants latest fixes
 
