@@ -53,6 +53,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import which
 
 API = "v63.0"
 CACHE = Path(__file__).resolve().parent.parent / ".data-space-analysis-cache"
@@ -90,9 +91,22 @@ DMO_CATALOGUE_SOQL = (
 )
 
 
+def resolve_sf_cli() -> str:
+    for candidate in ("sf", "sf.cmd", "sf.exe"):
+        path = which(candidate)
+        if path:
+            return path
+    raise RuntimeError(
+        "Salesforce CLI executable not found in PATH. "
+        "Install Salesforce CLI and restart your terminal. "
+        "Expected one of: sf, sf.cmd, sf.exe."
+    )
+
+
 def cli_auth() -> tuple[str, str, str]:
+    sf_cli = resolve_sf_cli()
     out = subprocess.run(
-        ["sf", "org", "display", "--json"],
+        [sf_cli, "org", "display", "--json"],
         capture_output=True,
         text=True,
         check=False,
