@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 import subprocess
@@ -206,12 +207,11 @@ def _cardinality_style(cardinality: str | None) -> tuple[str, str]:
     return "CFN ERD Zero Or More Arrow", "CFN ERD Zero Or More Arrow"
 
 
-def build_lucid_erd_json(run_id: str, space: str, run_dir: Path) -> Path:
+def collect_erd_graph_data() -> tuple[dict[str, tuple[str, str]], list[tuple[str, str, str, str | None]]]:
     streams = load_cache_json("data-streams").get("records", [])
     metadata_dlo = load_cache_json("metadata-dlo").get("records", [])
     metadata_dmo = load_cache_json("metadata-dmo").get("records", [])
     dmo_mappings = load_cache_json("dmo-mappings").get("byDmo", {})
-    prov = load_cache_json("_provenance")
 
     nodes: dict[str, tuple[str, str]] = {}  # apiName -> (type, label)
     edges: list[tuple[str, str, str, str | None]] = []  # src, dst, label, cardinality
@@ -263,6 +263,12 @@ def build_lucid_erd_json(run_id: str, space: str, run_dir: Path) -> Path:
         if e not in seen_edge:
             seen_edge.add(e)
             unique_edges.append(e)
+    return nodes, unique_edges
+
+
+def build_lucid_erd_json(run_id: str, space: str, run_dir: Path) -> Path:
+    prov = load_cache_json("_provenance")
+    nodes, unique_edges = collect_erd_graph_data()
 
     shape_ids: dict[str, str] = {}
     shapes: list[dict] = []
@@ -338,6 +344,63 @@ def build_lucid_erd_json(run_id: str, space: str, run_dir: Path) -> Path:
     return out
 
 
+def build_drawio_erd_xml(run_id: str, space: str, run_dir: Path) -> Path:
+    nodes, edges = collect_erd_graph_data()
+    ordered_nodes = sorted(nodes.items(), key=lambda x: (x[1][0], x[0]))
+    node_ids: dict[str, str] = {}
+    xml_parts: list[str] = []
+
+    xml_parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+    xml_parts.append('<mxfile host="app.diagrams.net" modified="" agent="DataCloudDataSpaceAnalysis" version="22.0.0">')
+    xml_parts.append(f'  <diagram id="erd_{run_id}" name="Data Cloud ERD {html.escape(space)}">')
+    xml_parts.append('    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1600" math="0" shadow="0">')
+    xml_parts.append("      <root>")
+    xml_parts.append('        <mxCell id="0"/>')
+    xml_parts.append('        <mxCell id="1" parent="0"/>')
+
+    # Basic grid layout
+    cols = 5
+    x0, y0 = 40, 40
+    x_step, y_step = 380, 130
+    for idx, (api_name, (kind, label)) in enumerate(ordered_nodes):
+        cell_id = f"n{idx + 1}"
+        node_ids[api_name] = cell_id
+        row = idx // cols
+        col = idx % cols
+        x = x0 + col * x_step
+        y = y0 + row * y_step
+        text = html.escape(f"{kind}: {label}")
+        xml_parts.append(
+            f'        <mxCell id="{cell_id}" value="{text}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAF5FF;strokeColor=#0176D3;fontSize=11;" vertex="1" parent="1">'
+        )
+        xml_parts.append(f'          <mxGeometry x="{x}" y="{y}" width="340" height="90" as="geometry"/>')
+        xml_parts.append("        </mxCell>")
+
+    for i, (src, dst, rel_label, cardinality) in enumerate(edges, start=1):
+        src_id = node_ids.get(src)
+        dst_id = node_ids.get(dst)
+        if not src_id or not dst_id:
+            continue
+        label = html.escape(rel_label or "")
+        style = "endArrow=block;endFill=1;html=1;strokeColor=#6B7280;"
+        if (cardinality or "").upper() in ("ONETOONE",):
+            style = "endArrow=block;startArrow=block;endFill=1;startFill=1;html=1;strokeColor=#6B7280;"
+        xml_parts.append(
+            f'        <mxCell id="e{i}" value="{label}" style="{style}" edge="1" parent="1" source="{src_id}" target="{dst_id}">'
+        )
+        xml_parts.append('          <mxGeometry relative="1" as="geometry"/>')
+        xml_parts.append("        </mxCell>")
+
+    xml_parts.append("      </root>")
+    xml_parts.append("    </mxGraphModel>")
+    xml_parts.append("  </diagram>")
+    xml_parts.append("</mxfile>")
+
+    out = run_dir / f"DataCloud_DataSpace_ERD_{space}_{run_id}.drawio"
+    out.write_text("\n".join(xml_parts), encoding="utf-8")
+    return out
+
+
 def run_command(run_id: str, step: str, cmd: list[str]) -> int:
     with _lock:
         _runs[run_id]["step"] = step
@@ -387,6 +450,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
             "outputFile": None,
             "workbookFile": None,
             "erdFile": None,
+            "drawioFile": None,
             "runDir": str(run_dir),
             "error": None,
         }
@@ -445,6 +509,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 output_file = str(renamed)
             workbook_file = str(build_cache_workbook(run_id=run_id, space=safe_space, run_dir=run_dir))
             erd_file = str(build_lucid_erd_json(run_id=run_id, space=safe_space, run_dir=run_dir))
+            drawio_file = str(build_drawio_erd_xml(run_id=run_id, space=safe_space, run_dir=run_dir))
 
             with _lock:
                 run = _runs[run_id]
@@ -454,6 +519,7 @@ def start_run(space: str, fresh_fetch: bool) -> str:
                 run["outputFile"] = output_file
                 run["workbookFile"] = workbook_file
                 run["erdFile"] = erd_file
+                run["drawioFile"] = drawio_file
                 if not output_file:
                     run["error"] = "Run finished but output file was not found."
                     run["status"] = "failed"
@@ -591,3 +657,18 @@ def api_run_download_erd(run_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="ERD file path no longer exists")
     return FileResponse(path, filename=path.name, media_type="application/json")
+
+
+@app.get("/api/runs/{run_id}/download-drawio")
+def api_run_download_drawio(run_id: str):
+    with _lock:
+        run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    drawio_file = run.get("drawioFile")
+    if not drawio_file:
+        raise HTTPException(status_code=404, detail="No Draw.io file for this run")
+    path = Path(drawio_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Draw.io file path no longer exists")
+    return FileResponse(path, filename=path.name, media_type="application/xml")

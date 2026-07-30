@@ -307,6 +307,12 @@
         erdLink.textContent = "Download Lucid ERD JSON (.json)";
         d.appendChild(erdLink);
       }
+      if (run.status === "completed" && run.drawioFile) {
+        const drawioLink = document.createElement("a");
+        drawioLink.href = `/api/runs/${run.id}/download-drawio`;
+        drawioLink.textContent = "Download Draw.io ERD (.drawio)";
+        d.appendChild(drawioLink);
+      }
       setStatusMessage(JSON.stringify(run, null, 2));
     }
 

@@ -117,6 +117,7 @@ Then open:
    - Analysis document (`.docx`)
    - Metadata workbook (`.xlsx`)
    - Lucid ERD JSON (`.json`)
+   - Draw.io ERD (`.drawio`) for direct diagram import
 
 If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
 
@@ -526,6 +527,7 @@ Open:
    - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
    - Lucid ERD JSON (`.json`) generated from Data Stream -> DLO -> DMO mappings and DMO relationships
+   - Draw.io ERD (`.drawio`) generated from the same relationship graph
 
 Tip: use the **Start Here (First-Time Setup)** section in this README for new-user onboarding before opening the launcher.
 
@@ -539,6 +541,8 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
   - `DataCloud_DataSpace_Metadata_Bundle_<space>_<run-id>.xlsx`
 - Lucid ERD JSON pattern:
   - `DataCloud_DataSpace_ERD_<space>_<run-id>.json`
+- Draw.io ERD pattern:
+  - `DataCloud_DataSpace_ERD_<space>_<run-id>.drawio`
 - Workbook contents:
   - `Summary` tab with run metadata and cache file index
   - one or more tabs per cache file (records and raw JSON views)
