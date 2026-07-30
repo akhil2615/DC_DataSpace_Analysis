@@ -34,6 +34,16 @@ chmod +x scripts/setup_unix.sh
 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+If setup says no active Salesforce login, run:
+
+```bash
+sf org login web --alias my-org
+sf config set target-org my-org --global
+sf org display --json
+```
+
+Then start launcher again with the same uvicorn command.
+
 Then open:
 
 - [http://127.0.0.1:8000](http://127.0.0.1:8000)
@@ -49,6 +59,14 @@ Then open:
    - Metadata workbook (`.xlsx`)
 
 If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
+
+### One-command update for existing users
+
+From the cloned repo folder:
+
+```bash
+git pull
+```
 
 ## Table of Contents
 

@@ -72,8 +72,9 @@ if (-not $SkipSfAuthCheck) {
     sf org display --json | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Salesforce CLI is installed, but no active org login was found." -ForegroundColor Yellow
-        Write-Host "Run: sf org login web --alias my-org" -ForegroundColor Yellow
-        Write-Host "Then set target org if needed: sf config set target-org my-org" -ForegroundColor Yellow
+        Write-Host "Run these commands now:" -ForegroundColor Yellow
+        Write-Host "  sf org login web --alias my-org" -ForegroundColor Yellow
+        Write-Host "  sf config set target-org my-org --global" -ForegroundColor Yellow
     } else {
         Write-Host "Salesforce org context is available." -ForegroundColor Green
     }

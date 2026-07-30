@@ -10,7 +10,6 @@ step() {
 }
 
 missing=()
-command -v python3 >/dev/null 2>&1 || missing+=("python3")
 command -v git >/dev/null 2>&1 || missing+=("git")
 command -v sf >/dev/null 2>&1 || missing+=("sf")
 
@@ -19,7 +18,6 @@ if [ "${#missing[@]}" -gt 0 ]; then
   echo "Missing required tools: ${missing[*]}"
   echo
   echo "Install guidance:"
-  [[ " ${missing[*]} " == *" python3 "* ]] && echo "  Python 3.10+: https://www.python.org/downloads/"
   [[ " ${missing[*]} " == *" git "* ]] && echo "  Git: https://git-scm.com/downloads"
   [[ " ${missing[*]} " == *" sf "* ]] && echo "  Salesforce CLI: https://developer.salesforce.com/tools/salesforcecli"
   echo
@@ -27,18 +25,30 @@ if [ "${#missing[@]}" -gt 0 ]; then
   exit 1
 fi
 
-step "Checking Python version (3.10+ required)"
-py_ver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-py_major="${py_ver%%.*}"
-py_minor="${py_ver##*.}"
-if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 10 ]; }; then
-  echo "Detected Python $py_ver. Python 3.10 or newer is required."
+step "Selecting Python interpreter (3.10+ required)"
+PYTHON_BIN=""
+for candidate in python3.12 python3.11 python3.10 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    py_ver="$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    py_major="${py_ver%%.*}"
+    py_minor="${py_ver##*.}"
+    if [ "$py_major" -gt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -ge 10 ]; }; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "No supported Python found. Install Python 3.10+ and ensure it is available as python3.10, python3.11, python3.12, or python3."
+  echo "Install: https://www.python.org/downloads/"
   exit 1
 fi
+echo "Using $PYTHON_BIN"
 
 step "Creating virtual environment (.venv) if needed"
 if [ ! -d ".venv" ]; then
-  python3 -m venv .venv
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 step "Installing Python dependencies"
@@ -51,8 +61,9 @@ mkdir -p .data-space-analysis-cache
 step "Checking Salesforce CLI authentication"
 if ! sf org display --json >/dev/null 2>&1; then
   echo "Salesforce CLI is installed, but no active org login was found."
-  echo "Run: sf org login web --alias my-org"
-  echo "Then set target org if needed: sf config set target-org my-org"
+  echo "Run these commands now:"
+  echo "  sf org login web --alias my-org"
+  echo "  sf config set target-org my-org --global"
 else
   echo "Salesforce org context is available."
 fi
