@@ -95,10 +95,28 @@ def cli_auth() -> tuple[str, str, str]:
         ["sf", "org", "display", "--json"],
         capture_output=True,
         text=True,
-        shell=True,
+        check=False,
         timeout=180,
     )
-    res = json.loads(out.stdout)["result"]
+    stdout = (out.stdout or "").strip()
+    stderr = (out.stderr or "").strip()
+    if out.returncode != 0:
+        raise RuntimeError(
+            "Salesforce CLI auth check failed. "
+            f"exit={out.returncode} stderr={stderr or '<empty>'} stdout={stdout or '<empty>'}"
+        )
+    if not stdout:
+        raise RuntimeError(
+            "Salesforce CLI returned empty stdout for 'sf org display --json'. "
+            f"stderr={stderr or '<empty>'}"
+        )
+    try:
+        res = json.loads(stdout)["result"]
+    except Exception as exc:
+        raise RuntimeError(
+            "Unable to parse JSON from 'sf org display --json'. "
+            f"stdout={stdout[:500]} stderr={stderr[:500]}"
+        ) from exc
     return res["accessToken"], res["instanceUrl"].rstrip("/"), res["id"]
 
 

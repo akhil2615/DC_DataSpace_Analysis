@@ -43,6 +43,16 @@ if ($missing.Count -gt 0) {
     exit 1
 }
 
+Write-Step "Checking Python version (3.10+ required)"
+$pyVersion = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+$parts = $pyVersion.Trim().Split(".")
+$major = [int]$parts[0]
+$minor = [int]$parts[1]
+if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) {
+    Write-Host "Detected Python $pyVersion. Python 3.10 or newer is required." -ForegroundColor Red
+    exit 1
+}
+
 Write-Step "Creating virtual environment (.venv) if needed"
 if (-not (Test-Path ".venv")) {
     python -m venv .venv

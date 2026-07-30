@@ -27,6 +27,15 @@ if [ "${#missing[@]}" -gt 0 ]; then
   exit 1
 fi
 
+step "Checking Python version (3.10+ required)"
+py_ver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+py_major="${py_ver%%.*}"
+py_minor="${py_ver##*.}"
+if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 10 ]; }; then
+  echo "Detected Python $py_ver. Python 3.10 or newer is required."
+  exit 1
+fi
+
 step "Creating virtual environment (.venv) if needed"
 if [ ! -d ".venv" ]; then
   python3 -m venv .venv
