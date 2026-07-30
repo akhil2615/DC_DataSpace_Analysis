@@ -6,9 +6,11 @@ This repository is focused on the automated Data Cloud Data Space Analysis pipel
 
 ## Start Here (First-Time Setup)
 
-First, you need the project files on your machine. Choose one option:
+Use this exact flow for first-time setup. This is the primary onboarding path.
 
-### Option A - Clone with Git (recommended)
+### Step 0: Get project files (choose one)
+
+#### Option A - Clone with Git (recommended)
 
 Windows / macOS / Linux:
 
@@ -17,14 +19,14 @@ git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
 cd DC_DataSpace_Analysis
 ```
 
-### Option B - Download ZIP (no Git required)
+#### Option B - Download ZIP (no Git required)
 
 1. Open the repository page in your browser.  
 2. Click **Code** -> **Download ZIP**.  
 3. Extract the ZIP.  
 4. Open terminal in the extracted project folder.
 
-Then run setup + launcher commands below.
+### Step 1: Run setup + start launcher
 
 Windows (PowerShell):
 
@@ -44,6 +46,18 @@ chmod +x scripts/setup_unix.sh
 Then open:
 
 - [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+### Step 2: First run in the UI
+
+1. Click **Check Setup**
+2. Click **Load Latest Data Spaces**
+3. Select a data space
+4. Click **Generate Analysis Files**
+5. Download both files:
+   - Analysis document (`.docx`)
+   - Metadata workbook (`.xlsx`)
+
+If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
 
 ## Table of Contents
 
@@ -173,6 +187,8 @@ If access is missing, the fetch step may return 400/403/404/500 for specific end
 
 ## Local Setup (Step by Step)
 
+This section is detailed reference. For most users, use **Start Here (First-Time Setup)** above.
+
 ### Fastest onboarding (recommended scripts)
 
 Windows PowerShell:
@@ -272,7 +288,7 @@ Validate:
 ### 3) Switch target org (if needed)
 
 ```bash
-sf config set target-org my-org
+sf config set target-org my-org --global
 sf org display --json
 ```
 
@@ -429,7 +445,7 @@ Open:
 2. Click **Load Latest Data Spaces** to refresh the data space dropdown from your org.
 3. Select the target data space.
 4. Keep **Pull latest metadata before generating document** enabled for current-state output (recommended).
-5. Click **Generate Analysis Bundle**.
+5. Click **Generate Analysis Files**.
 6. Watch live logs and download both outputs when complete:
    - analysis document (`.docx`)
    - Metadata workbook (`.xlsx`) with one summary tab and JSON-driven tabs
@@ -482,7 +498,7 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 
 - Run `sf org display --json`
 - Set correct target org:
-  - `sf config set target-org <alias>`
+  - `sf config set target-org <alias> --global`
 - Re-run fetch with `--clean-cache`
 
 ### No output for expected data space
