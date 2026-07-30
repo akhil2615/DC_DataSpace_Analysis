@@ -19,36 +19,12 @@ git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
 cd DC_DataSpace_Analysis
 ```
 
-### Step 1 (recommended): One-command start
-
-Windows (PowerShell):
-
-```bash
-powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1
-```
-
-macOS / Linux:
-
-```bash
-chmod +x scripts/start_unix.sh scripts/setup_unix.sh
-./scripts/start_unix.sh
-```
-
-This command:
-
-- validates prerequisites
-- creates `.venv` (if needed)
-- installs dependencies
-- checks Salesforce CLI auth context
-- starts the launcher
-
-### Step 1 (manual alternative): Setup + run in two commands
+### Step 1: Run setup
 
 Windows (PowerShell):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1
-.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 macOS / Linux:
@@ -58,7 +34,17 @@ chmod +x scripts/setup_unix.sh
 ./scripts/setup_unix.sh
 ```
 
-Only after setup completes successfully:
+### Step 2: Start launcher
+
+Only after setup completes successfully, run:
+
+Windows (PowerShell):
+
+```bash
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+macOS / Linux:
 
 ```bash
 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
@@ -80,7 +66,7 @@ Then open:
 
 - [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
-### Step 2: First run in the UI
+### Step 3: First run in the UI
 
 1. Click **Check Setup**
 2. Click **Load Latest Data Spaces**
@@ -92,7 +78,7 @@ Then open:
 
 If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
 
-### One-command update for existing users
+### Updating to latest version (existing users)
 
 From the cloned repo folder:
 
@@ -101,9 +87,10 @@ git pull
 ```
 
 Then run the same one-command start:
+Then repeat:
 
-- Windows: `powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1`
-- macOS/Linux: `./scripts/start_unix.sh`
+1. `scripts/setup_windows.ps1` (Windows) or `./scripts/setup_unix.sh` (macOS/Linux)
+2. Start launcher with uvicorn command above
 
 ## Table of Contents
 
@@ -550,11 +537,6 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 4. Start launcher:
    - Windows: `.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
    - macOS/Linux: `.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload`
-
-Note: you can run this entire flow using the one-command starters:
-
-- Windows: `powershell -ExecutionPolicy Bypass -File scripts/start_windows.ps1`
-- macOS/Linux: `./scripts/start_unix.sh`
 
 ### 2) Existing user wants latest fixes
 
