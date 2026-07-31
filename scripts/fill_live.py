@@ -360,6 +360,36 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
     ci_items = {k: v for k, v in ci_items.items() if in_space(v)}
     targets = {k: v for k, v in targets.items() if in_space(v)}
 
+    # Most inventory endpoints are org-wide and do not include a space key.
+    # Scope those by data-space members (DLOs) and then derive DMO scope from mappings.
+    member_dlos = {
+        m.get("memberName")
+        for m in members
+        if isinstance(m, dict) and m.get("memberName")
+    }
+    if member_dlos:
+        dlos = [d for d in dlos if d.get("name") in member_dlos]
+        meta_dlo = {k: v for k, v in meta_dlo.items() if k in member_dlos}
+        streams = [
+            s
+            for s in streams
+            if ((s.get("dataLakeObjectInfo") or {}).get("name") in member_dlos)
+        ]
+
+        scoped_dmos: set[str] = set()
+        for by_dmo_name, payload in mappings.items():
+            body = (payload or {}).get("body") or {}
+            for m in body.get("objectSourceTargetMaps") or []:
+                src = m.get("sourceEntityDeveloperName")
+                dst = m.get("targetEntityDeveloperName") or by_dmo_name
+                if src in member_dlos and dst:
+                    scoped_dmos.add(dst)
+                    scoped_dmos.add(by_dmo_name)
+        if scoped_dmos:
+            meta_dmo = [d for d in meta_dmo if d.get("name") in scoped_dmos]
+            catalogue = {k: v for k, v in catalogue.items() if k in scoped_dmos}
+            mappings = {k: v for k, v in mappings.items() if k in scoped_dmos}
+
     # Subject area and creation type per DMO, from the Tooling catalogue.
     subject_area: dict[str, str] = {}
     tooling_type: dict[str, str] = {}
