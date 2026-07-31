@@ -357,6 +357,9 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
     segments = [s for s in segments if in_space(s)]
     activations = [a for a in activations if in_space(a)]
     idres = [r for r in idres if in_space(r)]
+    transforms = [t for t in transforms if in_space(t)]
+    indexes = [i for i in indexes if in_space(i)]
+    graphs = [g for g in graphs if in_space(g)]
     ci_items = {k: v for k, v in ci_items.items() if in_space(v)}
     targets = {k: v for k, v in targets.items() if in_space(v)}
 
@@ -389,6 +392,43 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             meta_dmo = [d for d in meta_dmo if d.get("name") in scoped_dmos]
             catalogue = {k: v for k, v in catalogue.items() if k in scoped_dmos}
             mappings = {k: v for k, v in mappings.items() if k in scoped_dmos}
+
+    # Keep detailed payloads aligned to already scoped top-level lists.
+    scoped_activation_keys = {a.get("id") or a.get("developerName") for a in activations}
+    act_detail = {k: v for k, v in act_detail.items() if k in scoped_activation_keys}
+    scoped_graph_keys = {g.get("developerName") for g in graphs if g.get("developerName")}
+    graph_detail = {k: v for k, v in graph_detail.items() if k in scoped_graph_keys}
+
+    # Calculated-insight metadata is org-wide; keep only items present in scoped CI list.
+    scoped_ci_names = set(ci_items) | {v.get("apiName") for v in ci_items.values() if isinstance(v, dict)}
+    if scoped_ci_names:
+        meta_ci = [c for c in meta_ci if c.get("name") in scoped_ci_names or c.get("apiName") in scoped_ci_names]
+
+    # Connections endpoint is org-wide. Keep connections referenced by scoped streams.
+    scoped_conn_types = set()
+    scoped_conn_names = set()
+    for s in streams:
+        ci = s.get("connectorInfo") or {}
+        if ci.get("connectorType"):
+            scoped_conn_types.add(ci.get("connectorType"))
+        details = ci.get("connectorDetails") or {}
+        if details.get("name"):
+            scoped_conn_names.add(details.get("name"))
+    if scoped_conn_types or scoped_conn_names:
+        filtered_by_type = {}
+        for ctype, rows in conns_by_type.items():
+            if scoped_conn_types and ctype not in scoped_conn_types:
+                continue
+            keep = [
+                r
+                for r in rows
+                if not scoped_conn_names
+                or r.get("name") in scoped_conn_names
+                or r.get("label") in scoped_conn_names
+            ]
+            if keep:
+                filtered_by_type[ctype] = keep
+        conns_by_type = filtered_by_type
 
     # Subject area and creation type per DMO, from the Tooling catalogue.
     subject_area: dict[str, str] = {}
