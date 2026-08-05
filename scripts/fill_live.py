@@ -302,7 +302,9 @@ HUMAN_INPUTS = [
 # ---------------------------------------------------------------- section fills
 
 
-def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
+def fill(
+    doc, prov: dict, target_space: str
+) -> tuple[dict, list[tuple], list[tuple], list[tuple], dict]:
     t = doc.tables
     for table in t:
         table.style = "Table Grid"
@@ -352,8 +354,12 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
         s = rec_space(rec)
         return s is None or s == space_name
 
-    # Enforce data-space scoped records where payload includes a space key.
-    streams = [s for s in streams if in_space(s)]
+    # Keep two stream buckets for each run:
+    # 1) streams explicitly in the selected data space
+    # 2) streams with no data-space key (org-shared/global)
+    streams_in_space = [s for s in streams if rec_space(s) == space_name]
+    streams_global = [s for s in streams if rec_space(s) is None]
+    streams = streams_in_space + streams_global
     segments = [s for s in segments if in_space(s)]
     activations = [a for a in activations if in_space(a)]
     idres = [r for r in idres if in_space(r)]
@@ -371,12 +377,18 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
         if isinstance(m, dict) and m.get("memberName")
     }
     if member_dlos:
-        dlos = [d for d in dlos if d.get("name") in member_dlos]
-        meta_dlo = {k: v for k, v in meta_dlo.items() if k in member_dlos}
+        stream_dlos = {
+            (s.get("dataLakeObjectInfo") or {}).get("name")
+            for s in streams
+            if (s.get("dataLakeObjectInfo") or {}).get("name")
+        }
+        scoped_dlos = member_dlos | stream_dlos
+        dlos = [d for d in dlos if d.get("name") in scoped_dlos]
+        meta_dlo = {k: v for k, v in meta_dlo.items() if k in scoped_dlos}
         streams = [
             s
             for s in streams
-            if ((s.get("dataLakeObjectInfo") or {}).get("name") in member_dlos)
+            if ((s.get("dataLakeObjectInfo") or {}).get("name") in scoped_dlos)
         ]
 
         scoped_dmos: set[str] = set()
@@ -385,7 +397,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             for m in body.get("objectSourceTargetMaps") or []:
                 src = m.get("sourceEntityDeveloperName")
                 dst = m.get("targetEntityDeveloperName") or by_dmo_name
-                if src in member_dlos and dst:
+                if src in scoped_dlos and dst:
                     scoped_dmos.add(dst)
                     scoped_dmos.add(by_dmo_name)
         if scoped_dmos:
@@ -565,7 +577,8 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             )
     write_rows(t[10], stream_rows)
     counts["2.1 stream inventory"] = (
-        f"{len(stream_rows)} streams (ssot/data-streams?limit=200&includeMappings=true, one call)"
+        f"{len(stream_rows)} streams total (ssot/data-streams?limit=200&includeMappings=true, one call): "
+        f"{len(streams_in_space)} tagged to '{space_name}' and {len(streams_global)} with no data-space key"
     )
 
     # ---------- 2.2 Source connections (t11)
@@ -597,14 +610,14 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
     )
 
     # ---------- 3.1 DLO inventory (t13)
-    records_by_dlo: dict[str, int] = {}
+    # Record counts are intentionally NOT inferred here. A stream's totalRecords is
+    # a per-stream figure and does not equal the DLO row count (a DLO can be fed by
+    # several streams, full vs incremental, etc.), so summing it would be a guess.
+    # The DLO row count is left as NOT AVAILABLE FROM API.
     streams_by_dlo: dict[str, list[str]] = {}
     zero_copy_dlos: set[str] = set()
     for s in streams:
         nm = (s.get("dataLakeObjectInfo") or {}).get("name")
-        tot = s.get("totalRecords")
-        if nm and isinstance(tot, (int, float)):
-            records_by_dlo[nm] = records_by_dlo.get(nm, 0) + int(tot)
         if nm and s.get("name"):
             streams_by_dlo.setdefault(nm, []).append(s["name"])
         if nm and s.get("dataAccessMode") == "DIRECT_ACCESS":
@@ -623,7 +636,6 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 found.append(tgt)
 
     dlo_rows = []
-    total_dlo_records = 0
     for d in sorted(dlos, key=lambda x: x.get("label", "")):
         name = d.get("name", "")
         fields = d.get("fields") or d.get("dataLakeFieldInfoRepresentation") or []
@@ -635,9 +647,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             formula_cell = f"Y ({len(fx)}): " + "; ".join(fx) if fx else "N"
         else:
             formula_cell = NA
-        rec = records_by_dlo.get(name, NA)
-        if isinstance(rec, int):
-            total_dlo_records += rec
+        rec = NA
         dlo_rows.append(
             (
                 d.get("label", name),
@@ -670,10 +680,10 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
             )
     write_rows(t[13], dlo_rows)
     counts["3.1 dlo inventory"] = (
-        f"{len(dlo_rows)} DLOs (ssot/data-lake-objects); "
-        f"{sum(1 for r in dlo_rows if r[4] != NA)} row counts joined from the stream that feeds "
-        f"each DLO on dataLakeObjectInfo.name; formula fields from the stream mappings, excluding "
-        f"the platform-generated targets DataSource, DataSourceObject and cdp_sys_PartitionDate"
+        f"{len(dlo_rows)} DLOs (ssot/data-lake-objects); row counts are left as "
+        f"NOT AVAILABLE FROM API (not inferred from stream totalRecords); formula fields from the "
+        f"stream mappings, excluding the platform-generated targets DataSource, DataSourceObject "
+        f"and cdp_sys_PartitionDate"
     )
 
     # ---------- 4.1 DMO inventory (t15)
@@ -747,7 +757,102 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
         f"object MktDataModelObject"
     )
 
+    # ---------- 4.4 DLO -> DMO field mappings (t18)
+    dlo_label_by_api = {d.get("name", ""): d.get("label", d.get("name", "")) for d in dlos}
+    dmo_label_by_api = {
+        d.get("name", ""): d.get("displayName", d.get("name", ""))
+        for d in meta_dmo
+        if d.get("name")
+    }
+    dlo_fields: dict[str, dict[str, dict]] = {}
+    for d in dlos:
+        api = d.get("name")
+        if not api:
+            continue
+        fields = d.get("fields") or d.get("dataLakeFieldInfoRepresentation") or []
+        dlo_fields[api] = {f.get("name"): f for f in fields if isinstance(f, dict) and f.get("name")}
+    dmo_fields: dict[str, dict[str, dict]] = {}
+    for dmo_api, cat in catalogue.items():
+        fields = (cat or {}).get("fields") or []
+        dmo_fields[dmo_api] = {f.get("name"): f for f in fields if isinstance(f, dict) and f.get("name")}
+
+    def field_pretty(meta: dict | None, api_name: str) -> str:
+        if not meta:
+            return api_name
+        label = meta.get("label") or api_name
+        dtype = meta.get("dataType")
+        return f"{label}\n{api_name}{dtype if dtype else ''}"
+
+    map_rows = []
+    mapping_matrix_rows = []
+    for dmo_name in sorted(mappings):
+        res = mappings.get(dmo_name) or {}
+        if res.get("status") != 200:
+            continue
+        for obj_map in (res.get("body") or {}).get("objectSourceTargetMaps") or []:
+            src_entity = (
+                obj_map.get("sourceEntityDeveloperName")
+                or obj_map.get("sourceObjectDeveloperName")
+                or obj_map.get("sourceEntityName")
+                or obj_map.get("sourceObjectName")
+                or obj_map.get("sourceDeveloperName")
+                or NA
+            )
+            dst_entity = obj_map.get("targetEntityDeveloperName") or dmo_name
+            for fm in obj_map.get("fieldMappings") or []:
+                tgt = fm.get("targetFieldDeveloperName") or fm.get("targetFieldName") or ""
+                src = fm.get("sourceFieldDeveloperName") or fm.get("sourceFieldName") or ""
+                if not tgt:
+                    continue
+                # Keep lineage explicit so reviewers can trace mapping intent quickly.
+                dmo_field = f"{dst_entity}.{tgt}"
+                supplied_by = f"{src_entity}.{src}".rstrip(".") if src else src_entity
+                rule = (
+                    fm.get("expression")
+                    or fm.get("transformExpression")
+                    or fm.get("formula")
+                    or fm.get("mappingType")
+                    or "direct"
+                )
+                map_rows.append((dmo_field, supplied_by, supplied_by, rule, "mapping", ""))
+                mapping_matrix_rows.append(
+                    (
+                        f"{dlo_label_by_api.get(src_entity, src_entity)}\n{src_entity}",
+                        field_pretty((dlo_fields.get(src_entity) or {}).get(src), src),
+                        "->",
+                        f"{dmo_label_by_api.get(dst_entity, dst_entity)}\n{dst_entity}",
+                        field_pretty((dmo_fields.get(dst_entity) or {}).get(tgt), tgt),
+                    )
+                )
+    # Deduplicate while preserving order.
+    map_rows = list(dict.fromkeys(map_rows))
+    mapping_matrix_rows = list(dict.fromkeys(mapping_matrix_rows))
+    write_rows(t[18], map_rows)
+    counts["4.4 dlo-dmo field mappings"] = (
+        f"{len(map_rows)} field mappings from ssot/data-model-object-mappings "
+        f"(flattened from objectSourceTargetMaps.fieldMappings)"
+    )
+
     # ---------- 4.2 DMO relationships (t16)
+    dmo_label_by_api = {
+        d.get("name", ""): d.get("displayName", d.get("name", ""))
+        for d in meta_dmo
+        if d.get("name")
+    }
+
+    def rel_key_qualifier(field_api: str) -> str:
+        # Key qualifiers are not explicitly returned in DMO relationship metadata.
+        # Derive a readable candidate from the field api name.
+        core = (field_api or "").strip()
+        if not core:
+            return NA
+        if core.startswith("ssot__"):
+            core = core[len("ssot__") :]
+        if core.endswith("__c"):
+            core = core[:-3]
+        return f"KQ_{core}"
+
+    relationship_matrix_rows = []
     graph_edges: dict[tuple[str, str], list[str]] = {}
     graph_objects: dict[str, set[str]] = {}
     for g in graphs:
@@ -804,7 +909,25 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                     "",
                 )
             )
+            from_field = r.get("fromEntityAttribute", "")
+            to_field = r.get("toEntityAttribute", "")
+            from_meta = (dmo_fields.get(r.get("fromEntity", "")) or {}).get(from_field, {})
+            to_meta = (dmo_fields.get(r.get("toEntity", "")) or {}).get(to_field, {})
+            relationship_matrix_rows.append(
+                (
+                    "Relationship",
+                    cardinality(r.get("cardinality", "")),
+                    dmo_label_by_api.get(r.get("fromEntity", ""), r.get("fromEntity", "")),
+                    from_meta.get("label") or from_field,
+                    rel_key_qualifier(from_field),
+                    cardinality(r.get("cardinality", "")) or r.get("cardinality", ""),
+                    dmo_label_by_api.get(r.get("toEntity", ""), r.get("toEntity", "")),
+                    to_meta.get("label") or to_field,
+                    rel_key_qualifier(to_field),
+                )
+            )
     rel_rows.sort(key=lambda x: (x[0], x[1]))
+    relationship_matrix_rows = list(dict.fromkeys(relationship_matrix_rows))
     write_rows(t[16], rel_rows)
     counts["4.2 dmo relationships"] = (
         f"{len(rel_rows)} unique relationships (ssot/metadata?entityType=DataModelObject); "
@@ -1313,7 +1436,7 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
         or "no data space filter applied"
     )
     baselines = {
-        1: f"{total_dlo_records:,} rows across {sum(1 for r in dlo_rows if r[4] != NA)} streamed DLOs (per-DLO values in 3.1)",
+        1: NA,
         2: f"{total_unified:,} unified profiles across {len(idres)} rulesets",
         3: rates or NA,
         4: seg_pops or NA,
@@ -1358,7 +1481,82 @@ def fill(doc, prov: dict, target_space: str) -> tuple[dict, list[tuple]]:
                 "Decide whether it is in scope and record it manually",
             )
 
-    return counts, observations
+    # ---------- Tier 3 inventory: data actions, targets, connector catalog
+    def first(rec: dict, *keys, default=NA):
+        for k in keys:
+            v = rec.get(k)
+            if isinstance(v, str) and v:
+                return v
+            if isinstance(v, (int, float, bool)):
+                return v
+        return default
+
+    data_actions = [a for a in records("data-actions") if in_space(a)]
+    data_action_targets = [t2 for t2 in records("data-action-targets") if in_space(t2)]
+    connector_catalog = records("connectors-catalog")
+
+    data_action_rows = []
+    for a in sorted(data_actions, key=lambda x: (x.get("label") or x.get("name") or "")):
+        data_action_rows.append(
+            (
+                first(a, "label", "name"),
+                first(a, "name", "developerName", "apiName"),
+                first(a, "dataActionTargetName", "targetName", "targetDeveloperName"),
+                ui_label(first(a, "connectorType", "type", default="")),
+                first(a, "status", "state"),
+                rec_space(a) or "org-wide",
+            )
+        )
+
+    data_action_target_rows = []
+    for tgt in sorted(data_action_targets, key=lambda x: (x.get("label") or x.get("name") or "")):
+        data_action_target_rows.append(
+            (
+                first(tgt, "label", "name"),
+                first(tgt, "name", "developerName", "apiName"),
+                ui_label(first(tgt, "connectorType", "type", default="")),
+                first(tgt, "targetType", "subType"),
+                rec_space(tgt) or "org-wide",
+            )
+        )
+
+    # Connector catalog coverage: every available connector family and whether this
+    # org has at least one configured connection of that type. "Configured" counts
+    # come straight from ssot/connections, so nothing is inferred.
+    configured_counts = {ty: len(rows or []) for ty, rows in conns_by_type.items()}
+    connector_catalog_rows = []
+    for c in sorted(connector_catalog, key=lambda x: (x.get("label") or x.get("name") or "")):
+        ctype = first(c, "name", "connectorType", default="")
+        n = configured_counts.get(ctype, 0)
+        connector_catalog_rows.append(
+            (
+                first(c, "label", "name"),
+                ctype,
+                first(c, "releaseLevel", "category", "type"),
+                "Yes" if n else "No",
+                n if n else NA,
+            )
+        )
+
+    counts["Tier 3 data actions"] = (
+        f"{len(data_action_rows)} data actions in scope (ssot/data-actions)"
+    )
+    counts["Tier 3 data action targets"] = (
+        f"{len(data_action_target_rows)} data action targets in scope (ssot/data-action-targets)"
+    )
+    counts["Tier 3 connector catalog"] = (
+        f"{len(connector_catalog_rows)} connector families available (ssot/connectors); "
+        f"{sum(1 for r in connector_catalog_rows if r[3] == 'Yes')} configured in this org "
+        f"(configured counts from ssot/connections, not inferred)"
+    )
+
+    tier3 = {
+        "data_actions": data_action_rows,
+        "data_action_targets": data_action_target_rows,
+        "connector_catalog": connector_catalog_rows,
+    }
+
+    return counts, observations, mapping_matrix_rows, relationship_matrix_rows, tier3
 
 
 # ---------------------------------------------------------------- appendices
@@ -1388,7 +1586,15 @@ def collapse(observations: list[tuple], threshold: int = 3, sample: int = 12) ->
     return rows
 
 
-def appendices(doc, prov: dict, counts: dict, observations: list[tuple]) -> None:
+def appendices(
+    doc,
+    prov: dict,
+    counts: dict,
+    observations: list[tuple],
+    mapping_matrix_rows: list[tuple],
+    relationship_matrix_rows: list[tuple],
+    tier3: dict,
+) -> None:
     doc.add_page_break()
     doc.add_heading("Appendix A — Fill provenance", level=1)
     doc.add_paragraph(
@@ -1438,6 +1644,87 @@ def appendices(doc, prov: dict, counts: dict, observations: list[tuple]) -> None
         grouped,
     )
 
+    doc.add_page_break()
+    doc.add_heading("Appendix D — DLO to DMO mapping matrix", level=1)
+    doc.add_paragraph(
+        "Field-level lineage from source Data Lake Objects to target Data Model Objects. "
+        "Each row is one mapped field pair from the Data Cloud mapping metadata."
+    )
+    add_table(
+        doc,
+        [
+            "Source object (DLO)",
+            "Source field",
+            "->",
+            "Target object (DMO)",
+            "Target field",
+        ],
+        mapping_matrix_rows
+        if mapping_matrix_rows
+        else [("No mappings found", "", "", "", "")],
+    )
+
+    doc.add_page_break()
+    doc.add_heading("Appendix E — DMO to DMO relationship matrix", level=1)
+    doc.add_paragraph(
+        "Relationship lineage and cardinality between Data Model Objects. "
+        "This matrix is formatted for migration design reviews."
+    )
+    add_table(
+        doc,
+        [
+            "Relationships",
+            "Navigation Mode",
+            "Object",
+            "Field",
+            "Key Qualifier (Field)",
+            "Cardinality",
+            "Related Object",
+            "Related Field",
+            "Key Qualifier (Related Field)",
+        ],
+        relationship_matrix_rows
+        if relationship_matrix_rows
+        else [("No DMO relationships found", "", "", "", "", "", "", "", "")],
+    )
+
+    doc.add_page_break()
+    doc.add_heading("Appendix F — Data actions", level=1)
+    doc.add_paragraph(
+        "Data actions defined in the org (ssot/data-actions), scoped to this data space plus "
+        "any org-wide actions. Each row is read directly from the API."
+    )
+    add_table(
+        doc,
+        ["Label", "API name", "Target", "Connector", "Status", "Data space"],
+        tier3.get("data_actions") or [("No data actions found", "", "", "", "", "")],
+    )
+
+    doc.add_page_break()
+    doc.add_heading("Appendix G — Data action targets", level=1)
+    doc.add_paragraph(
+        "Destinations that data actions can send to (ssot/data-action-targets), scoped to this "
+        "data space plus any org-wide targets."
+    )
+    add_table(
+        doc,
+        ["Label", "API name", "Connector", "Target type", "Data space"],
+        tier3.get("data_action_targets") or [("No data action targets found", "", "", "", "")],
+    )
+
+    doc.add_page_break()
+    doc.add_heading("Appendix H — Connector catalog coverage", level=1)
+    doc.add_paragraph(
+        "Every connector family the org edition exposes (ssot/connectors) and whether this org "
+        "has at least one configured connection of that type. Configured counts come from "
+        "ssot/connections and are not inferred."
+    )
+    add_table(
+        doc,
+        ["Connector", "Type", "Release level", "Configured", "Connections"],
+        tier3.get("connector_catalog") or [("No connector catalog found", "", "", "", "")],
+    )
+
 
 def main() -> None:
     import argparse
@@ -1478,8 +1765,18 @@ def main() -> None:
             f"{date.today().strftime('%Y%m%d')}.docx"
         )
         doc = docx.Document(str(TEMPLATE))
-        counts, observations = fill(doc, prov, target)
-        appendices(doc, prov, counts, observations)
+        counts, observations, mapping_matrix_rows, relationship_matrix_rows, tier3 = fill(
+            doc, prov, target
+        )
+        appendices(
+            doc,
+            prov,
+            counts,
+            observations,
+            mapping_matrix_rows,
+            relationship_matrix_rows,
+            tier3,
+        )
         doc.save(str(out))
         print(f"org={org} space={target} fetched={prov.get('fetchedAtUtc')}")
         print(f"  observations flagged for review: {len(observations)}")

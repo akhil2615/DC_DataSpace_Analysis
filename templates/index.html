@@ -133,6 +133,28 @@
     }
     .downloads a:hover { text-decoration: underline; }
     .muted { color: var(--sf-muted); font-size: 12px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab-btn {
+      border: 1px solid #c9c7c5;
+      background: #fff;
+      padding: 8px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tab-btn.active {
+      background: var(--sf-blue);
+      border-color: var(--sf-blue);
+      color: #fff;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .compare-table-wrap { overflow: auto; border: 1px solid #d8dde6; border-radius: 6px; background: #fff; }
+    .compare-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .compare-table th, .compare-table td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; vertical-align: top; }
+    .compare-table th { background: #f8fafc; }
+    .item-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 6px 10px; margin-top: 6px; }
+    .item-grid label { font-weight: 500; margin: 0; display: flex; align-items: center; gap: 8px; }
     @media (max-width: 980px) { .container { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -143,7 +165,13 @@
   </div>
 
   <div class="container">
-    <section class="card">
+    <section class="card full">
+      <div class="tabs">
+        <button id="tabGenerateBtn" class="tab-btn active">Generate Analysis</button>
+        <button id="tabCompareBtn" class="tab-btn">Compare Source vs Destination</button>
+      </div>
+      <div id="tabGenerate" class="tab-panel active">
+      <section class="card">
       <h2>Run Controls</h2>
       <div class="row">
         <button id="btnPreflight" class="btn">Check Setup</button>
@@ -183,11 +211,91 @@
       <h2>Live Logs</h2>
       <div id="logs"><ul><li>Logs will appear here.</li></ul></div>
     </section>
+      </div>
+
+      <div id="tabCompare" class="tab-panel">
+        <section class="card">
+          <h2>Comparison Controls</h2>
+          <div class="row">
+            <button id="btnLoadOrgs" class="btn">Load Authenticated Orgs</button>
+            <span class="muted">Select source and destination org/data space, then run comparison.</span>
+          </div>
+          <div class="row">
+            <label>Items to Compare</label>
+            <div>
+              <button id="btnSelectAllItems" class="btn" type="button">Select All</button>
+              <button id="btnClearAllItems" class="btn" type="button">Clear All</button>
+            </div>
+            <div id="compareItems" class="item-grid"></div>
+          </div>
+          <div class="row">
+            <label for="sourceOrgSelect">Source Org</label>
+            <select id="sourceOrgSelect"></select>
+          </div>
+          <div class="row">
+            <label for="sourceSpaceSelect">Source Data Space</label>
+            <select id="sourceSpaceSelect"></select>
+          </div>
+          <div class="row">
+            <label for="destOrgSelect">Destination Org</label>
+            <select id="destOrgSelect"></select>
+          </div>
+          <div class="row">
+            <label for="destSpaceSelect">Destination Data Space</label>
+            <select id="destSpaceSelect"></select>
+          </div>
+          <div class="row">
+            <button id="btnCompare" class="btn btn-primary">Run Comparison</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Comparison Status</h2>
+          <div class="status-grid">
+            <div class="status-key">Compare ID</div><div id="cRunId">-</div>
+            <div class="status-key">Status</div><div id="cStatus">No comparison started</div>
+            <div class="status-key">Step</div><div id="cStep">-</div>
+            <div class="status-key">Source</div><div id="cSource">-</div>
+            <div class="status-key">Destination</div><div id="cDest">-</div>
+            <div class="status-key">Started</div><div id="cStart">-</div>
+            <div class="status-key">Finished</div><div id="cFinish">-</div>
+            <div class="status-key">Error</div><div id="cError">-</div>
+          </div>
+          <div class="downloads" id="compareDownloads"></div>
+        </section>
+
+        <section class="card full">
+          <h2>Comparison Output</h2>
+          <div id="compareLogs" style="background:#0f172a;color:#e2e8f0;border-radius:6px;padding:10px;min-height:120px;max-height:220px;overflow:auto;font-family:Consolas,monospace;font-size:12px;">Logs will appear here.</div>
+          <div class="compare-table-wrap" style="margin-top:12px;">
+            <table class="compare-table" id="compareTable">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Source Count</th>
+                  <th>Destination Count</th>
+                  <th>Missing in Destination</th>
+                  <th>Missing in Source</th>
+                  <th>Missing in Destination (Full List)</th>
+                  <th>Missing in Source (Full List)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="7">Run a comparison to see results.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
   </div>
 
   <script>
     let activeRunId = null;
     let pollTimer = null;
+    let activeCompareId = null;
+    let comparePollTimer = null;
+    let compareItems = [];
 
     function setStatusMessage(text) {
       document.getElementById("statusMessage").textContent = text;
@@ -338,6 +446,197 @@
       await pollRun();
     }
 
+    function switchTab(target) {
+      const genBtn = document.getElementById("tabGenerateBtn");
+      const cmpBtn = document.getElementById("tabCompareBtn");
+      const gen = document.getElementById("tabGenerate");
+      const cmp = document.getElementById("tabCompare");
+      const isGenerate = target === "generate";
+      genBtn.classList.toggle("active", isGenerate);
+      cmpBtn.classList.toggle("active", !isGenerate);
+      gen.classList.toggle("active", isGenerate);
+      cmp.classList.toggle("active", !isGenerate);
+    }
+
+    function orgOptionLabel(org) {
+      const alias = org.alias ? `${org.alias} ` : "";
+      const username = org.username || "(unknown)";
+      const orgId = org.orgId || "";
+      return `${alias}- ${username} ${orgId ? `(${orgId})` : ""}`;
+    }
+
+    async function loadOrgs() {
+      const data = await getJson("/api/orgs");
+      const src = document.getElementById("sourceOrgSelect");
+      const dst = document.getElementById("destOrgSelect");
+      src.innerHTML = "";
+      dst.innerHTML = "";
+      for (const org of data.orgs || []) {
+        const value = org.alias || org.username || org.orgId;
+        const text = orgOptionLabel(org);
+        const a = document.createElement("option");
+        a.value = value;
+        a.textContent = text;
+        const b = document.createElement("option");
+        b.value = value;
+        b.textContent = text;
+        src.appendChild(a);
+        dst.appendChild(b);
+      }
+      if (!src.options.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No authenticated orgs found";
+        src.appendChild(opt);
+        dst.appendChild(opt.cloneNode(true));
+        return;
+      }
+      if (dst.options.length > 1) {
+        dst.selectedIndex = 1;
+      }
+      await loadOrgSpaces("sourceOrgSelect", "sourceSpaceSelect");
+      await loadOrgSpaces("destOrgSelect", "destSpaceSelect");
+    }
+
+    function renderCompareItems() {
+      const wrap = document.getElementById("compareItems");
+      wrap.innerHTML = "";
+      for (const item of compareItems) {
+        const id = "cmpItem_" + item.id.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+        const label = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = true;
+        cb.value = item.id;
+        cb.id = id;
+        label.appendChild(cb);
+        const span = document.createElement("span");
+        span.textContent = item.id;
+        label.appendChild(span);
+        wrap.appendChild(label);
+      }
+      if (!compareItems.length) {
+        wrap.innerHTML = "<span class='muted'>No compare items available.</span>";
+      }
+    }
+
+    function getSelectedCompareItems() {
+      return Array.from(document.querySelectorAll("#compareItems input[type='checkbox']:checked")).map(x => x.value);
+    }
+
+    async function loadCompareItems() {
+      const data = await getJson("/api/compare/items");
+      compareItems = data.items || [];
+      renderCompareItems();
+    }
+
+    async function loadOrgSpaces(orgSelectId, spaceSelectId) {
+      const org = document.getElementById(orgSelectId).value.trim();
+      const sel = document.getElementById(spaceSelectId);
+      sel.innerHTML = "";
+      if (!org) return;
+      const data = await getJson(`/api/org-spaces?org=${encodeURIComponent(org)}`);
+      for (const space of data.spaces || []) {
+        const opt = document.createElement("option");
+        opt.value = space;
+        opt.textContent = space;
+        sel.appendChild(opt);
+      }
+      if (!sel.options.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No spaces found for this org";
+        sel.appendChild(opt);
+      }
+    }
+
+    function renderCompare(compare) {
+      setField("cRunId", compare.id);
+      setField("cStatus", compare.status || "-");
+      setField("cStep", compare.step || "-");
+      setField("cSource", `${compare.sourceOrg || "-"} / ${compare.sourceSpace || "-"}`);
+      setField("cDest", `${compare.destinationOrg || "-"} / ${compare.destinationSpace || "-"}`);
+      setField("cStart", compare.startedAtUtc || "-");
+      setField("cFinish", compare.finishedAtUtc || "-");
+      setField("cError", compare.error || "-");
+
+      const logsEl = document.getElementById("compareLogs");
+      logsEl.textContent = (compare.logs || []).join("\n") || "No logs yet.";
+
+      const d = document.getElementById("compareDownloads");
+      d.innerHTML = "";
+      if (compare.status === "completed" && compare.outputFile) {
+        const link = document.createElement("a");
+        link.href = `/api/compares/${compare.id}/download`;
+        link.textContent = "Download comparison JSON";
+        d.appendChild(link);
+      }
+
+      const body = document.querySelector("#compareTable tbody");
+      const rows = compare.rows || [];
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="7">No comparison rows yet.</td></tr>`;
+        return;
+      }
+      const esc = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      const listHtml = (arr) => {
+        const vals = Array.isArray(arr) ? arr : [];
+        if (!vals.length) return "-";
+        return vals.map(x => esc(x)).join("<br/>");
+      };
+      body.innerHTML = rows.map(r => `
+        <tr>
+          <td>${esc(r.item || "")}</td>
+          <td>${r.sourceCount ?? 0}</td>
+          <td>${r.destinationCount ?? 0}</td>
+          <td>${r.missingInDestinationCount ?? 0}</td>
+          <td>${r.missingInSourceCount ?? 0}</td>
+          <td>${listHtml(r.missingInDestination)}</td>
+          <td>${listHtml(r.missingInSource)}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function pollCompare() {
+      if (!activeCompareId) return;
+      try {
+        const run = await getJson(`/api/compares/${activeCompareId}`);
+        renderCompare(run);
+        if (run.status === "completed" || run.status === "failed") {
+          clearInterval(comparePollTimer);
+          comparePollTimer = null;
+        }
+      } catch (err) {
+        document.getElementById("compareLogs").textContent = "Could not refresh comparison status: " + err.message;
+      }
+    }
+
+    async function startCompare() {
+      const sourceOrg = document.getElementById("sourceOrgSelect").value.trim();
+      const sourceSpace = document.getElementById("sourceSpaceSelect").value.trim();
+      const destinationOrg = document.getElementById("destOrgSelect").value.trim();
+      const destinationSpace = document.getElementById("destSpaceSelect").value.trim();
+      const selectedItems = getSelectedCompareItems();
+      if (!sourceOrg || !sourceSpace || !destinationOrg || !destinationSpace) {
+        document.getElementById("compareLogs").textContent = "Select source/destination org and data space first.";
+        return;
+      }
+      if (!selectedItems.length) {
+        document.getElementById("compareLogs").textContent = "Select at least one item category to compare.";
+        return;
+      }
+      const data = await getJson("/api/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceOrg, sourceSpace, destinationOrg, destinationSpace, selectedItems })
+      });
+      activeCompareId = data.compareId;
+      document.getElementById("compareLogs").textContent = `Comparison started (ID: ${activeCompareId})`;
+      if (comparePollTimer) clearInterval(comparePollTimer);
+      comparePollTimer = setInterval(pollCompare, 2500);
+      await pollCompare();
+    }
+
     document.getElementById("btnPreflight").addEventListener("click", async () => {
       try { await runPreflight(); } catch (err) { setStatusMessage(err.message); }
     });
@@ -347,8 +646,30 @@
     document.getElementById("btnRun").addEventListener("click", async () => {
       try { await startRun(); } catch (err) { setStatusMessage(err.message); }
     });
+    document.getElementById("tabGenerateBtn").addEventListener("click", () => switchTab("generate"));
+    document.getElementById("tabCompareBtn").addEventListener("click", () => switchTab("compare"));
+    document.getElementById("btnLoadOrgs").addEventListener("click", async () => {
+      try { await loadOrgs(); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+    });
+    document.getElementById("sourceOrgSelect").addEventListener("change", async () => {
+      try { await loadOrgSpaces("sourceOrgSelect", "sourceSpaceSelect"); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+    });
+    document.getElementById("destOrgSelect").addEventListener("change", async () => {
+      try { await loadOrgSpaces("destOrgSelect", "destSpaceSelect"); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+    });
+    document.getElementById("btnCompare").addEventListener("click", async () => {
+      try { await startCompare(); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+    });
+    document.getElementById("btnSelectAllItems").addEventListener("click", () => {
+      document.querySelectorAll("#compareItems input[type='checkbox']").forEach(cb => cb.checked = true);
+    });
+    document.getElementById("btnClearAllItems").addEventListener("click", () => {
+      document.querySelectorAll("#compareItems input[type='checkbox']").forEach(cb => cb.checked = false);
+    });
 
     loadSpaces().catch(err => setStatusMessage(err.message));
+    loadOrgs().catch(err => { document.getElementById("compareLogs").textContent = err.message; });
+    loadCompareItems().catch(err => { document.getElementById("compareLogs").textContent = err.message; });
   </script>
 </body>
 </html>

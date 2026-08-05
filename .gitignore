@@ -1,4 +1,5 @@
 .data-space-analysis-cache/
+.dc1-cache/
 runs/
 __pycache__/
 *.pyc

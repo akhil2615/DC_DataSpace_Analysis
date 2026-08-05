@@ -6,7 +6,7 @@ This repository is focused on the automated Data Cloud Data Space Analysis pipel
 
 ## Start Here (First-Time Setup)
 
-Use this exact flow for first-time setup. This is the primary onboarding path.
+Use this exact flow for first-time setup. This is the primary onboarding path for both macOS and Windows users.
 
 Estimated time: 5-10 minutes (if Python + Salesforce CLI are already installed).
 
@@ -19,7 +19,7 @@ git clone https://github.com/akhil2615/DC_DataSpace_Analysis.git
 cd DC_DataSpace_Analysis
 ```
 
-### Step 1: Run setup
+### Step 1: Run setup script
 
 Windows (PowerShell):
 
@@ -119,6 +119,107 @@ Then open:
 
 If **Check Setup** shows `Setup Ready (Data not loaded)`, that is normal for first run. Click **Load Latest Data Spaces**.
 
+---
+
+## Daily Use (After First-Time Setup)
+
+### Start the app each time
+
+Run from repo root:
+
+Windows (PowerShell):
+
+```bash
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+macOS / Linux:
+
+```bash
+.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+### Start the server later (after restart / next day)
+
+If you close terminal, reboot, or come back later, just run the same start command again from repo root.
+
+Windows (PowerShell):
+
+```bash
+cd DC_DataSpace_Analysis
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+macOS / Linux:
+
+```bash
+cd DC_DataSpace_Analysis
+.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+If it does not start:
+
+1. Run setup again once:
+   - Windows: `powershell -ExecutionPolicy Bypass -File scripts/setup_windows.ps1`
+   - macOS/Linux: `./scripts/setup_unix.sh`
+2. Try port 8010 if 8000 is busy:
+   - `python -m uvicorn app:app --host 127.0.0.1 --port 8010 --reload`
+
+### Standard run flow
+
+1. Click **Check Setup**
+2. Click **Load Latest Data Spaces**
+3. Select the space
+4. Keep **Run fresh fetch** enabled unless intentionally reusing cache
+5. Click **Generate Analysis Files**
+
+### Quick rerun without refetch (faster)
+
+If you only changed fill logic/template and want to reuse cached metadata:
+
+1. Uncheck **Run fresh fetch**
+2. Click **Generate Analysis Files**
+
+---
+
+## Switch Org Context (Critical)
+
+Always switch org context before loading spaces or running a fresh fetch.
+
+### 1) See current org
+
+```bash
+sf org display --json
+```
+
+Validate `orgId`, `username`, and `instanceUrl`.
+
+### 2) Switch to a different org
+
+```bash
+sf org list --all
+sf config set target-org <alias-or-username> --global
+sf org display --json
+```
+
+### 3) Refresh metadata after org switch
+
+In the UI:
+
+1. **Check Setup**
+2. **Load Latest Data Spaces**
+3. Generate files
+
+CLI alternative:
+
+```bash
+python -u scripts/fetch_live.py --clean-cache --workers 8 --max-retries 4 --retry-base-ms 400 --adaptive-throttle
+```
+
+If you skip refresh after switching org, your output may reflect stale cache from the previous org.
+
 ### Updating to latest version (existing users)
 
 From the cloned repo folder:
@@ -127,11 +228,10 @@ From the cloned repo folder:
 git pull
 ```
 
-Then run the same one-command start:
 Then repeat:
 
 1. `scripts/setup_windows.ps1` (Windows) or `./scripts/setup_unix.sh` (macOS/Linux)
-2. Start launcher with uvicorn command above
+2. Start launcher with the uvicorn command above
 
 ## Table of Contents
 
@@ -632,6 +732,14 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 
 ## Troubleshooting
 
+Use this order when someone is stuck:
+
+1. Confirm repo root and virtual environment command path
+2. Confirm Python and `sf` are installed
+3. Confirm Salesforce org context
+4. Refresh cache (`--clean-cache`)
+5. Retry in UI
+
 ### `sf: command not found` or `sf` not recognized
 
 - Install Salesforce CLI
@@ -656,6 +764,24 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 - Validate user permissions for Data Cloud metadata endpoints
 - Confirm your user has access to the data space and Data Cloud objects
 
+### 401 across most Data Cloud endpoints
+
+If fetch logs show many `status=401` rows, the CLI token was not usable at runtime.
+
+Use this recovery flow:
+
+```bash
+sf org login web --alias my-org
+sf config set target-org my-org --global
+sf org display --json
+python -u scripts/fetch_live.py --clean-cache --workers 4 --max-retries 2 --retry-base-ms 400 --adaptive-throttle
+```
+
+Notes:
+
+- Current fetch logic auto-falls back to `sf org display --verbose --json` when `sf org display --json` redacts tokens.
+- If your local CLI still redacts tokens after re-login, set `SF_TEMP_SHOW_SECRETS=true` in that shell as a temporary workaround.
+
 ### 429/rate-limit behavior
 
 - Keep `--adaptive-throttle` enabled
@@ -671,6 +797,33 @@ Tip: use the **Start Here (First-Time Setup)** section in this README for new-us
 
 - Ensure the expected analysis template file exists at configured location
 - Avoid renaming template without updating script expectations
+
+### `No supported Python found` during macOS setup
+
+The setup script checks for `python3.12`, `python3.11`, `python3.10`, then `python3`.
+
+Fix:
+
+```bash
+brew install python@3.11
+python3.11 --version
+./scripts/setup_unix.sh
+```
+
+If `.venv/bin/python` is missing, setup did not complete. Install Python 3.10+ first, then rerun setup.
+
+### `WinError 2` / file not found during fetch or launcher run
+
+Usually means executable resolution failed (`sf` or python path).
+
+Checks:
+
+```bash
+sf --version
+python --version
+```
+
+Then rerun setup script and start using the exact launcher command from this README.
 
 ## Security and Operational Notes
 

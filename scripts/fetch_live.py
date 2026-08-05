@@ -1,9 +1,10 @@
 """Fetch every Data Cloud metadata endpoint needed for the analysis record into a JSON cache.
 
-One command, one pass. Auth comes from the Salesforce CLI default org
-(`sf org display --json`), so the cache always belongs to whichever org the CLI is
-pointed at. Org id, instance and fetch timestamp go to _provenance.json so the fill
-step can prove provenance.
+One command, one pass. Auth comes from the Salesforce CLI default org.
+The fetcher first tries `sf org display --json`; if the CLI redacts tokens, it
+falls back to `sf org display --verbose --json` to retrieve an access token.
+Org id, instance and fetch timestamp go to _provenance.json so the fill step can
+prove provenance.
 
 Cost control:
   * Phase 0 counts DMOs with one Tooling query, so the catalogue can be paged
@@ -30,10 +31,10 @@ against the v67 OpenAPI spec at developer.salesforce.com/docs/data/connectapi):
     `dloDeveloperName` alone returns INVALID_INPUT, and Tooling has no
     MktDataLakeMapping object, so there is no bulk form.
   * /ssot/data-graphs and /ssot/streaming-data-transforms cannot be listed.
-  * /ssot/connections requires a connectorType. /ssot/connectors lists all 94 types
-    the platform supports, not the configured ones, so probing it wholesale costs
-    more than it returns; the probe list is the curated set plus every type actually
-    seen on a data stream. Pass --all-connectors to probe all 94.
+  * /ssot/connections requires a connectorType. /ssot/connectors lists connector
+    families the platform supports (can be much larger than the configured subset).
+    Default connector scope is now comprehensive (`--connector-scope all`) to avoid
+    missing configured connectors. Use `--connector-scope curated` for faster runs.
   * Neither streams nor identity resolutions expose run history or durations.
   * /ssot/data-kits returns 500 on this org, so kit packaging stays manual.
 """
@@ -65,6 +66,8 @@ RETRY_BASE_MS = 400
 THROTTLE_WARN_PCT = 85.0
 THROTTLE_HARD_PCT = 92.0
 
+# Curated baseline connector types. The fetcher can also expand this list from
+# ssot/connectors to avoid missing newly introduced connector families.
 CONNECTOR_TYPES = [
     "SalesforceMarketingCloud",
     "SalesforceDotCom",
@@ -103,35 +106,71 @@ def resolve_sf_cli() -> str:
     )
 
 
-def cli_auth() -> tuple[str, str, str]:
+def cli_auth(target_org: str | None = None) -> tuple[str, str, str]:
     sf_cli = resolve_sf_cli()
-    out = subprocess.run(
-        [sf_cli, "org", "display", "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
+    target_args = ["--target-org", target_org] if target_org else []
+
+    def run_and_parse(args: list[str], label: str) -> dict:
+        out = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+        stdout = (out.stdout or "").strip()
+        stderr = (out.stderr or "").strip()
+        if out.returncode != 0:
+            raise RuntimeError(
+                f"Salesforce CLI auth check failed for '{label}'. "
+                f"exit={out.returncode} stderr={stderr or '<empty>'} stdout={stdout or '<empty>'}"
+            )
+        if not stdout:
+            raise RuntimeError(
+                f"Salesforce CLI returned empty stdout for '{label}'. "
+                f"stderr={stderr or '<empty>'}"
+            )
+        try:
+            body = json.loads(stdout)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to parse JSON from '{label}'. "
+                f"stdout={stdout[:500]} stderr={stderr[:500]}"
+            ) from exc
+        return body.get("result") or {}
+
+    # Newer sf versions can redact accessToken on plain display output.
+    res = run_and_parse(
+        [sf_cli, "org", "display", "--json", *target_args],
+        "sf org display --json",
     )
-    stdout = (out.stdout or "").strip()
-    stderr = (out.stderr or "").strip()
-    if out.returncode != 0:
-        raise RuntimeError(
-            "Salesforce CLI auth check failed. "
-            f"exit={out.returncode} stderr={stderr or '<empty>'} stdout={stdout or '<empty>'}"
+    token = (res.get("accessToken") or "").strip()
+    if not token or token.startswith("[REDACTED]"):
+        res_verbose = run_and_parse(
+            [sf_cli, "org", "display", "--verbose", "--json", *target_args],
+            "sf org display --verbose --json",
         )
-    if not stdout:
+        token = (res_verbose.get("accessToken") or "").strip()
+        # Keep the richer payload from verbose if available.
+        if res_verbose:
+            res = res_verbose
+
+    if not token or token.startswith("[REDACTED]"):
         raise RuntimeError(
-            "Salesforce CLI returned empty stdout for 'sf org display --json'. "
-            f"stderr={stderr or '<empty>'}"
+            "Salesforce CLI did not return a usable access token. "
+            "Try re-login with 'sf org login web --alias <alias>' and re-run. "
+            "If your CLI still redacts tokens, set SF_TEMP_SHOW_SECRETS=true for this shell "
+            "or update Salesforce CLI to a version that supports token retrieval commands."
         )
-    try:
-        res = json.loads(stdout)["result"]
-    except Exception as exc:
+
+    instance = (res.get("instanceUrl") or "").rstrip("/")
+    org_id = res.get("id") or ""
+    if not instance or not org_id:
         raise RuntimeError(
-            "Unable to parse JSON from 'sf org display --json'. "
-            f"stdout={stdout[:500]} stderr={stderr[:500]}"
-        ) from exc
-    return res["accessToken"], res["instanceUrl"].rstrip("/"), res["id"]
+            "Salesforce CLI did not return instanceUrl/org id. "
+            "Run 'sf org display --json' and verify the active org context."
+        )
+    return token, instance, org_id
 
 
 class Org:
@@ -140,8 +179,9 @@ class Org:
         max_retries: int = MAX_RETRIES,
         retry_base_ms: int = RETRY_BASE_MS,
         adaptive_throttle: bool = True,
+        target_org: str | None = None,
     ) -> None:
-        self.token, self.instance, self.org_id = cli_auth()
+        self.token, self.instance, self.org_id = cli_auth(target_org=target_org)
         self.calls = 0
         self.retries = 0
         self.max_retries = max_retries
@@ -441,11 +481,21 @@ def main() -> None:
     import argparse
 
     global WORKERS
+    global CACHE
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Fetch Data Cloud metadata into cache for analysis generation."
     )
-    parser.add_argument("--all-connectors", action="store_true", help="Probe all connector types from ssot/connectors.")
+    parser.add_argument(
+        "--connector-scope",
+        choices=("all", "curated"),
+        default="all",
+        help=(
+            "Connector probe scope: 'all' (default) probes every connector type returned by "
+            "ssot/connectors to avoid missing configured connectors; 'curated' probes the "
+            "curated list plus connector types seen on streams."
+        ),
+    )
     parser.add_argument("--workers", type=int, default=WORKERS, help="Max parallel workers (default: 8).")
     parser.add_argument("--max-retries", type=int, default=MAX_RETRIES, help="Retries for 429/5xx/network errors.")
     parser.add_argument("--retry-base-ms", type=int, default=RETRY_BASE_MS, help="Base backoff in milliseconds.")
@@ -456,15 +506,28 @@ def main() -> None:
         default=True,
         help="Adaptively slow requests when API limit usage is high (default: enabled).",
     )
+    parser.add_argument(
+        "--target-org",
+        default="",
+        help="Salesforce org alias/username/id to run against (optional).",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default="",
+        help="Override output cache directory (optional).",
+    )
     args = parser.parse_args()
 
     WORKERS = max(1, args.workers)
+    if args.cache_dir:
+        CACHE = Path(args.cache_dir).resolve()
     t0 = time.time()
-    all_connectors = args.all_connectors
+    connector_scope = args.connector_scope
     org = Org(
         max_retries=max(0, args.max_retries),
         retry_base_ms=max(50, args.retry_base_ms),
         adaptive_throttle=bool(args.adaptive_throttle),
+        target_org=(args.target_org.strip() or None),
     )
     print(f"org={org.org_id} instance={org.instance} api={API} workers={WORKERS}", flush=True)
 
@@ -538,6 +601,13 @@ def main() -> None:
             "data-graphs",
             lambda: flat_list(org.get("ssot/data-graphs/metadata"), "dataGraphMetadata"),
         ),
+        # Tier 3 inventory: data actions, their targets, and the full connector catalog.
+        ("data-actions", lambda: flat_list(org.get("ssot/data-actions"))),
+        ("data-action-targets", lambda: flat_list(org.get("ssot/data-action-targets"))),
+        (
+            "connectors-catalog",
+            lambda: flat_list(org.get("ssot/connectors", {"fieldGroup": "SMALL"}), "connectorInfoList"),
+        ),
         # Keep this fetch focused on sections currently used by the template.
     ]
     print(f"phase 1: {len(tasks)} independent endpoints", flush=True)
@@ -561,16 +631,17 @@ def main() -> None:
             if (s.get("connectorInfo") or {}).get("connectorType")
         }
     )
-    if all_connectors:
-        cat = org.get("ssot/connectors", {"fieldGroup": "SMALL"})
-        probe_types = sorted(
-            {
-                c["name"]
-                for c in (cat["body"].get("connectorInfoList") or [])
-                if c.get("name")
-            }
-            or probe_types
-        )
+    # Full coverage mode: expand probe types from the connector catalog.
+    # This costs more API calls but avoids missing connector families such as
+    # additional Salesforce instances, Databricks variants, MC, and MCP.
+    if connector_scope == "all":
+        catalog_types = {
+            c["name"]
+            for c in (results["connectors-catalog"]["records"] or [])
+            if isinstance(c, dict) and c.get("name")
+        }
+        if catalog_types:
+            probe_types = sorted(set(probe_types) | catalog_types)
 
     # ---------------- phase 2: per-object loops, also concurrent
     print(
