@@ -82,6 +82,20 @@
       color: white;
     }
     .btn-primary:hover { background: #0260b8; }
+    .btn:disabled { opacity: 0.7; cursor: default; }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: -2px;
+      margin-right: 8px;
+      opacity: 0.9;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .pill {
       display: inline-block;
       border-radius: 12px;
@@ -311,6 +325,29 @@
       document.getElementById(id).textContent = value ?? "-";
     }
 
+    function setButtonLoading(btn, loading, loadingText) {
+      if (!btn) return;
+      if (loading) {
+        if (btn.dataset.originalHtml === undefined) {
+          btn.dataset.originalHtml = btn.innerHTML;
+        }
+        btn.disabled = true;
+        btn.classList.add("is-loading");
+        btn.innerHTML = `<span class="spinner"></span>${loadingText || btn.dataset.originalHtml}`;
+      } else {
+        btn.disabled = false;
+        btn.classList.remove("is-loading");
+        if (btn.dataset.originalHtml !== undefined) {
+          btn.innerHTML = btn.dataset.originalHtml;
+          delete btn.dataset.originalHtml;
+        }
+      }
+    }
+
+    function stopButtonLoading(id) {
+      setButtonLoading(document.getElementById(id), false);
+    }
+
 
     async function getJson(url, options) {
       const res = await fetch(url, options);
@@ -420,6 +457,7 @@
         if (run.status === "completed" || run.status === "failed") {
           clearInterval(pollTimer);
           pollTimer = null;
+          stopButtonLoading("btnRun");
         }
       } catch (err) {
         setStatusMessage("Could not refresh run status: " + err.message);
@@ -431,7 +469,7 @@
       const freshFetch = document.getElementById("freshFetch").checked;
       if (!space) {
         setStatusMessage("Please select a data space before generating files.");
-        return;
+        return false;
       }
       const data = await getJson("/api/run", {
         method: "POST",
@@ -444,6 +482,7 @@
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(pollRun, 2000);
       await pollRun();
+      return true;
     }
 
     function switchTab(target) {
@@ -605,6 +644,7 @@
         if (run.status === "completed" || run.status === "failed") {
           clearInterval(comparePollTimer);
           comparePollTimer = null;
+          stopButtonLoading("btnCompare");
         }
       } catch (err) {
         document.getElementById("compareLogs").textContent = "Could not refresh comparison status: " + err.message;
@@ -619,11 +659,11 @@
       const selectedItems = getSelectedCompareItems();
       if (!sourceOrg || !sourceSpace || !destinationOrg || !destinationSpace) {
         document.getElementById("compareLogs").textContent = "Select source/destination org and data space first.";
-        return;
+        return false;
       }
       if (!selectedItems.length) {
         document.getElementById("compareLogs").textContent = "Select at least one item category to compare.";
-        return;
+        return false;
       }
       const data = await getJson("/api/compare", {
         method: "POST",
@@ -635,21 +675,39 @@
       if (comparePollTimer) clearInterval(comparePollTimer);
       comparePollTimer = setInterval(pollCompare, 2500);
       await pollCompare();
+      return true;
     }
 
-    document.getElementById("btnPreflight").addEventListener("click", async () => {
+    document.getElementById("btnPreflight").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      setButtonLoading(btn, true, "Checking...");
       try { await runPreflight(); } catch (err) { setStatusMessage(err.message); }
+      finally { setButtonLoading(btn, false); }
     });
-    document.getElementById("btnRefreshSpaces").addEventListener("click", async () => {
+    document.getElementById("btnRefreshSpaces").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      setButtonLoading(btn, true, "Loading...");
       try { await refreshSpaces(); } catch (err) { setStatusMessage(err.message); }
+      finally { setButtonLoading(btn, false); }
     });
-    document.getElementById("btnRun").addEventListener("click", async () => {
-      try { await startRun(); } catch (err) { setStatusMessage(err.message); }
+    document.getElementById("btnRun").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      setButtonLoading(btn, true, "Generating...");
+      try {
+        const started = await startRun();
+        if (!started) setButtonLoading(btn, false);
+      } catch (err) {
+        setStatusMessage(err.message);
+        setButtonLoading(btn, false);
+      }
     });
     document.getElementById("tabGenerateBtn").addEventListener("click", () => switchTab("generate"));
     document.getElementById("tabCompareBtn").addEventListener("click", () => switchTab("compare"));
-    document.getElementById("btnLoadOrgs").addEventListener("click", async () => {
+    document.getElementById("btnLoadOrgs").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      setButtonLoading(btn, true, "Loading...");
       try { await loadOrgs(); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+      finally { setButtonLoading(btn, false); }
     });
     document.getElementById("sourceOrgSelect").addEventListener("change", async () => {
       try { await loadOrgSpaces("sourceOrgSelect", "sourceSpaceSelect"); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
@@ -657,8 +715,16 @@
     document.getElementById("destOrgSelect").addEventListener("change", async () => {
       try { await loadOrgSpaces("destOrgSelect", "destSpaceSelect"); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
     });
-    document.getElementById("btnCompare").addEventListener("click", async () => {
-      try { await startCompare(); } catch (err) { document.getElementById("compareLogs").textContent = err.message; }
+    document.getElementById("btnCompare").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      setButtonLoading(btn, true, "Comparing...");
+      try {
+        const started = await startCompare();
+        if (!started) setButtonLoading(btn, false);
+      } catch (err) {
+        document.getElementById("compareLogs").textContent = err.message;
+        setButtonLoading(btn, false);
+      }
     });
     document.getElementById("btnSelectAllItems").addEventListener("click", () => {
       document.querySelectorAll("#compareItems input[type='checkbox']").forEach(cb => cb.checked = true);
