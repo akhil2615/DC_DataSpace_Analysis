@@ -52,6 +52,14 @@ CARDINALITY = {
     "NTON": "N to N",
 }
 
+# ssot/connections reports a connectorType that does not always match the name a
+# connector family carries in ssot/connectors. This maps the connection vocabulary
+# onto the catalog vocabulary so the "Configured" flag in Appendix H is accurate.
+# It documents a known equivalence, not an inferred value.
+CONNECTION_TO_CATALOG_TYPE = {
+    "SalesforceDotCom": "SalesforceCRM",
+}
+
 # Formula targets every stream carries because the platform adds them.
 SYSTEM_FORMULA_TARGETS = {"DataSource", "DataSourceObject", "cdp_sys_PartitionDate"}
 
@@ -1522,12 +1530,22 @@ def fill(
 
     # Connector catalog coverage: every available connector family and whether this
     # org has at least one configured connection of that type. "Configured" counts
-    # come straight from ssot/connections, so nothing is inferred.
-    configured_counts = {ty: len(rows or []) for ty, rows in conns_by_type.items()}
+    # come straight from ssot/connections, so nothing is inferred. Connection
+    # connectorType values are normalised onto the catalog vocabulary first. The
+    # catalog is org-wide, so configured status is measured against ALL org
+    # connections (the unfiltered response), not the space-scoped subset in 2.2.
+    all_conns_by_type = load("connections").get("byType", {})
+    configured_by_catalog: dict[str, int] = {}
+    for ty, rows in all_conns_by_type.items():
+        key = CONNECTION_TO_CATALOG_TYPE.get(ty, ty)
+        configured_by_catalog[key] = configured_by_catalog.get(key, 0) + len(rows or [])
+    catalog_names = {
+        first(c, "name", "connectorType", default="") for c in connector_catalog
+    }
     connector_catalog_rows = []
     for c in sorted(connector_catalog, key=lambda x: (x.get("label") or x.get("name") or "")):
         ctype = first(c, "name", "connectorType", default="")
-        n = configured_counts.get(ctype, 0)
+        n = configured_by_catalog.get(ctype, 0)
         connector_catalog_rows.append(
             (
                 first(c, "label", "name"),
@@ -1537,6 +1555,15 @@ def fill(
                 n if n else NA,
             )
         )
+    # Surface any configured connection type that the catalog does not list (for
+    # example IngestApi), so a live connection is never hidden from the coverage view.
+    for ty in sorted(set(configured_by_catalog) - catalog_names):
+        n = configured_by_catalog[ty]
+        if n:
+            connector_catalog_rows.insert(
+                0,
+                (ui_label(ty), ty, "not in catalog", "Yes", n),
+            )
 
     counts["Tier 3 data actions"] = (
         f"{len(data_action_rows)} data actions in scope (ssot/data-actions)"
@@ -1716,8 +1743,13 @@ def appendices(
     doc.add_heading("Appendix H — Connector catalog coverage", level=1)
     doc.add_paragraph(
         "Every connector family the org edition exposes (ssot/connectors) and whether this org "
-        "has at least one configured connection of that type. Configured counts come from "
-        "ssot/connections and are not inferred."
+        "has at least one configured connection of that type. This view is org-wide (the catalog "
+        "is not data-space specific), so Configured is measured against every connection in the "
+        "org, unlike section 2.2 which is scoped to this data space's streams. Configured counts "
+        "come from ssot/connections and are not inferred. A connection's connectorType is "
+        "normalised onto the catalog vocabulary (for example SalesforceDotCom maps to "
+        "SalesforceCRM); a live connection type the catalog does not list is shown at the top "
+        "marked 'not in catalog'."
     )
     add_table(
         doc,
