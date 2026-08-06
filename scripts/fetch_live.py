@@ -655,9 +655,22 @@ def main() -> None:
         return name, {"status": res["status"], "body": res["body"]}
 
     def one_connector(ctype: str):
-        res = org.get("ssot/connections", {"connectorType": ctype, "limit": PAGE, "offset": 0})
-        rows = res["body"].get("connections", []) if isinstance(res["body"], dict) else []
-        return ctype, rows if res["status"] < 400 else []
+        # Page through so a connector type with more than one page of connections
+        # is captured in full instead of just the first PAGE rows.
+        rows: list = []
+        for page in range(MAX_PAGES):
+            res = org.get(
+                "ssot/connections",
+                {"connectorType": ctype, "limit": PAGE, "offset": page * PAGE},
+            )
+            if res["status"] >= 400:
+                return ctype, [] if page == 0 else dedupe(rows)
+            body = res["body"] if isinstance(res["body"], dict) else {}
+            chunk = body.get("connections", []) or []
+            rows.extend(chunk)
+            if len(chunk) < PAGE:
+                break
+        return ctype, dedupe(rows)
 
     def one_graph(g: dict):
         dev = g.get("developerName")

@@ -96,6 +96,78 @@
       opacity: 0.9;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 1000;
+      padding: 24px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 1100px;
+      margin: auto;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--sf-border);
+      background: linear-gradient(90deg, var(--sf-blue-dark), var(--sf-blue));
+      color: #fff;
+    }
+    .modal-head h2 { margin: 0; border: 0; padding: 0; font-size: 16px; color: #fff; }
+    .modal-close {
+      background: transparent;
+      border: 0;
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 8px;
+    }
+    .modal-subtabs { display: flex; gap: 8px; padding: 10px 18px 0; }
+    .modal-body { padding: 14px 18px; overflow: auto; }
+    .preview-pane { display: none; }
+    .preview-pane.active { display: block; }
+    .doc-preview { font-size: 13px; line-height: 1.5; color: #181818; }
+    .doc-preview h1 { font-size: 20px; }
+    .doc-preview h2 { font-size: 17px; margin-top: 18px; }
+    .doc-preview h3 { font-size: 15px; margin-top: 14px; }
+    .doc-preview h4 { font-size: 13px; margin-top: 12px; }
+    .doc-preview p { margin: 6px 0; }
+    .doc-preview table.doc-table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 12px; }
+    .doc-preview table.doc-table th, .doc-preview table.doc-table td {
+      border: 1px solid #e5e7eb; padding: 4px 7px; text-align: left; vertical-align: top;
+    }
+    .doc-preview table.doc-table th { background: #f8fafc; font-weight: 700; }
+    .sheet-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .sheet-tab {
+      border: 1px solid #c9c7c5; background: #fff; padding: 4px 10px;
+      border-radius: 14px; cursor: pointer; font-size: 12px; font-weight: 600;
+    }
+    .sheet-tab.active { background: var(--sf-blue); border-color: var(--sf-blue); color: #fff; }
+    .sheet-panel { display: none; }
+    .sheet-panel.active { display: block; }
+    .sheet-table-wrap { overflow: auto; border: 1px solid #d8dde6; border-radius: 6px; max-height: 60vh; }
+    .sheet-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    .sheet-table th, .sheet-table td { border: 1px solid #e5e7eb; padding: 4px 7px; text-align: left; white-space: nowrap; }
+    .sheet-table th { background: #f8fafc; position: sticky; top: 0; }
+    .btn-link {
+      display: inline-block; margin-right: 10px; text-decoration: none;
+      font-weight: 600; color: var(--sf-blue);
+    }
+    .btn-link:hover { text-decoration: underline; }
     .pill {
       display: inline-block;
       border-radius: 12px;
@@ -304,6 +376,29 @@
     </section>
   </div>
 
+  <div id="previewModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="previewTitle">Preview generated files</h2>
+        <button id="previewCloseBtn" class="modal-close" title="Close">&times;</button>
+      </div>
+      <div class="modal-subtabs">
+        <button id="previewDocTab" class="tab-btn active" type="button">Document (.docx)</button>
+        <button id="previewSheetTab" class="tab-btn" type="button">Workbook (.xlsx)</button>
+      </div>
+      <div class="modal-body">
+        <div class="downloads" id="previewDownloads" style="margin-bottom:10px;"></div>
+        <div id="previewDocPane" class="preview-pane active">
+          <div id="previewDoc" class="doc-preview">Loading document preview...</div>
+        </div>
+        <div id="previewSheetPane" class="preview-pane">
+          <div id="previewSheetTabs" class="sheet-tabs"></div>
+          <div id="previewSheets"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let activeRunId = null;
     let pollTimer = null;
@@ -445,6 +540,15 @@
         xlsxLink.href = `/api/runs/${run.id}/download-workbook`;
         xlsxLink.textContent = "Download Metadata Workbook (.xlsx, multiple tabs)";
         d.appendChild(xlsxLink);
+      }
+      if (run.status === "completed" && (run.outputFile || run.workbookFile)) {
+        const previewBtn = document.createElement("button");
+        previewBtn.className = "btn btn-primary";
+        previewBtn.textContent = "Preview generated files";
+        previewBtn.style.marginTop = "4px";
+        previewBtn.addEventListener("click", () => openPreview(run.id));
+        d.appendChild(document.createElement("br"));
+        d.appendChild(previewBtn);
       }
       setStatusMessage(JSON.stringify(run, null, 2));
     }
@@ -677,6 +781,103 @@
       await pollCompare();
       return true;
     }
+
+    function switchPreviewTab(target) {
+      const isDoc = target === "doc";
+      document.getElementById("previewDocTab").classList.toggle("active", isDoc);
+      document.getElementById("previewSheetTab").classList.toggle("active", !isDoc);
+      document.getElementById("previewDocPane").classList.toggle("active", isDoc);
+      document.getElementById("previewSheetPane").classList.toggle("active", !isDoc);
+    }
+
+    function closePreview() {
+      document.getElementById("previewModal").classList.remove("open");
+    }
+
+    function renderSheets(sheets) {
+      const tabsEl = document.getElementById("previewSheetTabs");
+      const panesEl = document.getElementById("previewSheets");
+      tabsEl.innerHTML = "";
+      panesEl.innerHTML = "";
+      if (!sheets || !sheets.length) {
+        panesEl.innerHTML = "<p class='muted'>No workbook available.</p>";
+        return;
+      }
+      const esc = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      sheets.forEach((sheet, idx) => {
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = "sheet-tab" + (idx === 0 ? " active" : "");
+        tab.textContent = `${sheet.name} (${sheet.totalRows})`;
+        tab.addEventListener("click", () => {
+          document.querySelectorAll("#previewSheetTabs .sheet-tab").forEach(t => t.classList.remove("active"));
+          document.querySelectorAll("#previewSheets .sheet-panel").forEach(p => p.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById("sheetPanel_" + idx).classList.add("active");
+        });
+        tabsEl.appendChild(tab);
+
+        const panel = document.createElement("div");
+        panel.className = "sheet-panel" + (idx === 0 ? " active" : "");
+        panel.id = "sheetPanel_" + idx;
+        const rows = sheet.rows || [];
+        let html = '<div class="sheet-table-wrap"><table class="sheet-table">';
+        rows.forEach((r, i) => {
+          const tag = i === 0 ? "th" : "td";
+          html += "<tr>" + r.map(c => `<${tag}>${esc(c)}</${tag}>`).join("") + "</tr>";
+        });
+        html += "</table></div>";
+        if (sheet.truncated) {
+          html += `<div class="muted" style="margin-top:6px;">Showing first ${rows.length - 1} of ${sheet.totalRows - 1} data rows. Download the workbook for the full data.</div>`;
+        }
+        panel.innerHTML = rows.length ? html : "<p class='muted'>Empty sheet.</p>";
+        panesEl.appendChild(panel);
+      });
+    }
+
+    async function openPreview(runId) {
+      const modal = document.getElementById("previewModal");
+      modal.classList.add("open");
+      switchPreviewTab("doc");
+      document.getElementById("previewDoc").innerHTML = "Loading document preview...";
+      document.getElementById("previewSheetTabs").innerHTML = "";
+      document.getElementById("previewSheets").innerHTML = "";
+      document.getElementById("previewDownloads").innerHTML = "";
+      try {
+        const data = await getJson(`/api/runs/${runId}/preview`);
+        document.getElementById("previewTitle").textContent = data.docName || "Preview generated files";
+        document.getElementById("previewDoc").innerHTML = data.docxHtml || "<p class='muted'>No document available.</p>";
+        renderSheets(data.sheets);
+
+        const dl = document.getElementById("previewDownloads");
+        if (data.docName) {
+          const a = document.createElement("a");
+          a.className = "btn-link";
+          a.href = `/api/runs/${runId}/download`;
+          a.textContent = "Download document (.docx)";
+          dl.appendChild(a);
+        }
+        if (data.workbookName) {
+          const b = document.createElement("a");
+          b.className = "btn-link";
+          b.href = `/api/runs/${runId}/download-workbook`;
+          b.textContent = "Download workbook (.xlsx)";
+          dl.appendChild(b);
+        }
+      } catch (err) {
+        document.getElementById("previewDoc").innerHTML = "<p class='muted'>Could not load preview: " + err.message + "</p>";
+      }
+    }
+
+    document.getElementById("previewCloseBtn").addEventListener("click", closePreview);
+    document.getElementById("previewDocTab").addEventListener("click", () => switchPreviewTab("doc"));
+    document.getElementById("previewSheetTab").addEventListener("click", () => switchPreviewTab("sheet"));
+    document.getElementById("previewModal").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("previewModal")) closePreview();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closePreview();
+    });
 
     document.getElementById("btnPreflight").addEventListener("click", async (e) => {
       const btn = e.currentTarget;

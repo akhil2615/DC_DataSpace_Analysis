@@ -921,3 +921,132 @@ def api_run_download_workbook(run_id: str):
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def _html_escape(text: str) -> str:
+    return (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def docx_to_html(path: Path) -> str:
+    """Render a generated .docx into simple, readable HTML for in-browser preview."""
+    import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = docx.Document(str(path))
+    parts: list[str] = []
+    open_list = False
+
+    def render_paragraph(par) -> str:
+        nonlocal open_list
+        text = _html_escape(par.text)
+        style = (par.style.name if par.style else "") or ""
+        style_l = style.lower()
+        if style_l.startswith("list"):
+            prefix = "" if open_list else "<ul>"
+            open_list = True
+            return f"{prefix}<li>{text or '&nbsp;'}</li>"
+        closing = "</ul>" if open_list else ""
+        open_list = False
+        if not text.strip():
+            return closing
+        if style_l == "title":
+            return f"{closing}<h1>{text}</h1>"
+        if style_l.startswith("heading 1"):
+            return f"{closing}<h2>{text}</h2>"
+        if style_l.startswith("heading 2"):
+            return f"{closing}<h3>{text}</h3>"
+        if style_l.startswith("heading 3"):
+            return f"{closing}<h4>{text}</h4>"
+        return f"{closing}<p>{text}</p>"
+
+    def render_table(tbl) -> str:
+        nonlocal open_list
+        closing = "</ul>" if open_list else ""
+        open_list = False
+        rows_html = []
+        for i, row in enumerate(tbl.rows):
+            tag = "th" if i == 0 else "td"
+            cells = "".join(
+                f"<{tag}>{_html_escape(c.text).replace(chr(10), '<br/>')}</{tag}>"
+                for c in row.cells
+            )
+            rows_html.append(f"<tr>{cells}</tr>")
+        return f'{closing}<table class="doc-table">{"".join(rows_html)}</table>'
+
+    for child in doc.element.body.iterchildren():
+        tag = child.tag
+        if tag.endswith("}p"):
+            parts.append(render_paragraph(Paragraph(child, doc)))
+        elif tag.endswith("}tbl"):
+            parts.append(render_table(Table(child, doc)))
+    if open_list:
+        parts.append("</ul>")
+    return "\n".join(p for p in parts if p)
+
+
+def xlsx_to_preview(path: Path, max_rows: int = 200) -> list[dict]:
+    """Return each worksheet as a capped list of rows for in-browser preview."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(path), read_only=True, data_only=True)
+    sheets: list[dict] = []
+    try:
+        for ws in wb.worksheets:
+            rows: list[list[str]] = []
+            total = 0
+            for r in ws.iter_rows(values_only=True):
+                total += 1
+                if len(rows) < max_rows:
+                    rows.append(["" if v is None else str(v) for v in r])
+            sheets.append(
+                {
+                    "name": ws.title,
+                    "rows": rows,
+                    "totalRows": total,
+                    "truncated": total > max_rows,
+                }
+            )
+    finally:
+        wb.close()
+    return sheets
+
+
+@app.get("/api/runs/{run_id}/preview")
+def api_run_preview(run_id: str):
+    with _lock:
+        run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    result: dict[str, Any] = {
+        "docxHtml": None,
+        "docName": None,
+        "sheets": None,
+        "workbookName": None,
+    }
+    output_file = run.get("outputFile")
+    if output_file and Path(output_file).exists():
+        try:
+            result["docxHtml"] = docx_to_html(Path(output_file))
+            result["docName"] = Path(output_file).name
+        except Exception as exc:  # noqa: BLE001 - preview should never hard-fail
+            result["docxHtml"] = f"<p>Could not render document preview: {_html_escape(str(exc))}</p>"
+            result["docName"] = Path(output_file).name
+    workbook_file = run.get("workbookFile")
+    if workbook_file and Path(workbook_file).exists():
+        try:
+            result["sheets"] = xlsx_to_preview(Path(workbook_file))
+            result["workbookName"] = Path(workbook_file).name
+        except Exception as exc:  # noqa: BLE001
+            result["sheets"] = [
+                {"name": "error", "rows": [[f"Could not render workbook preview: {exc}"]], "totalRows": 1, "truncated": False}
+            ]
+            result["workbookName"] = Path(workbook_file).name
+    if result["docxHtml"] is None and result["sheets"] is None:
+        raise HTTPException(status_code=404, detail="No generated files available to preview")
+    return result
