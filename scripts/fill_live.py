@@ -42,6 +42,7 @@ CONNECTOR_UI_LABELS = {
     "AwsS3": "Amazon S3",
     "FacebookAds": "Meta Ads",
     "MarketingCloudPersonalization": "Marketing Cloud Personalization",
+    "SalesforceInteractionStudio": "Marketing Cloud Personalization",
     "SalesforceCommerceCloud": "Commerce Cloud",
 }
 
@@ -362,6 +363,77 @@ def fill(
         s = rec_space(rec)
         return s is None or s == space_name
 
+    # ssot/data-streams only returns streams from the caller's default-space
+    # context, so it silently drops streams that live in other data spaces
+    # (Marketing Cloud, MC Personalization, etc.). Recover the full org-wide list
+    # from the Tooling API (DataStreamDefinition) and merge in any stream that is
+    # not already present, scoping each to a data space via its target DLO's
+    # dataSpaceInfo so the document stays an accurate replica of the org.
+    all_dlo_names = {d.get("name") for d in dlos if d.get("name")}
+    dlo_spaces = {
+        d.get("name"): {
+            si.get("name")
+            for si in (d.get("dataSpaceInfo") or [])
+            if isinstance(si, dict) and si.get("name")
+        }
+        for d in dlos
+        if d.get("name")
+    }
+    mkt_dlo_by_id = {
+        r.get("Id"): r.get("DeveloperName")
+        for r in records("tooling-mkt-dlo")
+        if r.get("Id")
+    }
+    mkt_conn_label_by_id = {
+        r.get("Id"): r.get("MasterLabel")
+        for r in records("tooling-mkt-connection")
+        if r.get("Id")
+    }
+
+    def resolve_stream_dlo(dev: str | None) -> str:
+        if not dev:
+            return ""
+        for cand in (f"{dev}__dll", dev):
+            if cand in all_dlo_names:
+                return cand
+        for n in all_dlo_names:
+            if n.startswith(dev):
+                return n
+        return f"{dev}__dll"
+
+    ssot_stream_names = {s.get("name") for s in streams if s.get("name")}
+    recovered_streams: list[dict] = []
+    for ts in records("tooling-data-streams"):
+        name = ts.get("DeveloperName")
+        if not name or name in ssot_stream_names:
+            continue
+        dlo = resolve_stream_dlo(mkt_dlo_by_id.get(ts.get("MktDataLakeObjectId")))
+        spaces_for_dlo = dlo_spaces.get(dlo) or set()
+        if spaces_for_dlo and space_name not in spaces_for_dlo:
+            # Stream belongs to other data space(s) only; not part of this space.
+            continue
+        ctype = ts.get("DataConnectorType") or ""
+        cid = ts.get("DataConnectorId") or ""
+        rec = {
+            "name": name,
+            "label": ts.get("MasterLabel") or name,
+            "connectorInfo": {
+                "connectorType": ctype,
+                "connectorDetails": {"name": mkt_conn_label_by_id.get(cid) or cid},
+            },
+            "dataLakeObjectInfo": {"name": dlo} if dlo else {},
+            "creationType": ts.get("CreationType") or "",
+            "lastRunStatus": None,
+            "totalRecords": None,
+            "_recovered": True,
+        }
+        # Only tag a space when the DLO authoritatively belongs to it; otherwise
+        # leave it unset so it is treated as org-shared/global.
+        if spaces_for_dlo and space_name in spaces_for_dlo:
+            rec["dataSpaceName"] = space_name
+        recovered_streams.append(rec)
+    streams = streams + recovered_streams
+
     # Keep two stream buckets for each run:
     # 1) streams explicitly in the selected data space
     # 2) streams with no data-space key (org-shared/global)
@@ -543,6 +615,9 @@ def fill(
             )
         )
         label = s.get("label") or s.get("name", "")
+        # Recovered (Tooling-only) streams carry no ssot runtime detail, so the
+        # runtime-quality checks below do not apply to them and would misreport.
+        recovered = bool(s.get("_recovered"))
         if s.get("lastRunStatus") not in (None, "SUCCESS"):
             flag(
                 "2.1 streams",
@@ -551,7 +626,7 @@ def fill(
                 "A stream that is not succeeding may be carrying stale or partial data",
                 "Fix or consciously exclude before using its row count as a baseline",
             )
-        if not s.get("totalRecords"):
+        if not recovered and not s.get("totalRecords"):
             flag(
                 "2.1 streams",
                 label,
@@ -559,7 +634,7 @@ def fill(
                 "An empty stream is often abandoned, but may also be newly built",
                 "Confirm whether it is in scope",
             )
-        if not dlo_info.get("recordModifiedFieldName"):
+        if not recovered and not dlo_info.get("recordModifiedFieldName"):
             flag(
                 "2.1 streams",
                 label,
@@ -585,8 +660,9 @@ def fill(
             )
     write_rows(t[10], stream_rows)
     counts["2.1 stream inventory"] = (
-        f"{len(stream_rows)} streams total (ssot/data-streams?limit=200&includeMappings=true, one call): "
-        f"{len(streams_in_space)} tagged to '{space_name}' and {len(streams_global)} with no data-space key"
+        f"{len(stream_rows)} streams total (ssot/data-streams + Tooling DataStreamDefinition merged): "
+        f"{len(streams_in_space)} tagged to '{space_name}', {len(streams_global)} org-shared, "
+        f"{len(recovered_streams)} recovered from the Tooling API that ssot/data-streams did not return"
     )
 
     # ---------- 2.2 Source connections (t11)
@@ -611,10 +687,42 @@ def fill(
         conn_rows.append(
             (c.get("label", ""), c.get("name", ""), ui_label(ty), "", "", "", " | ".join(note))
         )
+
+    # Some connector families (notably SalesforceInteractionStudio / Marketing
+    # Cloud Personalization) are never returned by ssot/connections. Derive those
+    # connections from the streams that use them so the connection inventory is
+    # complete rather than silently dropping a configured connector.
+    covered_types = set(conns_by_type.keys())
+    derived_seen: set[tuple[str, str]] = set()
+    derived_conn_count = 0
+    for s in sorted(streams, key=lambda x: x.get("label", "")):
+        ci = s.get("connectorInfo") or {}
+        ctype = ci.get("connectorType") or ""
+        if not ctype or ctype in covered_types:
+            continue
+        cname = (ci.get("connectorDetails") or {}).get("name") or ""
+        key = (ctype, cname)
+        if key in derived_seen:
+            continue
+        derived_seen.add(key)
+        derived_conn_count += 1
+        conn_rows.append(
+            (
+                cname or ui_label(ctype),
+                cname,
+                ui_label(ctype),
+                "",
+                "",
+                "",
+                f"API connectorType: {ctype} | derived from data streams "
+                f"(ssot/connections does not expose this connector family)",
+            )
+        )
     write_rows(t[11], conn_rows)
     counts["2.2 source connections"] = (
-        f"{len(conn_rows)} connections across {len(conns_by_type)} connector types "
-        f"(ssot/connections?connectorType=..., one call per probed type)"
+        f"{len(conn_rows)} connections: {len(conn_rows) - derived_conn_count} from "
+        f"ssot/connections across {len(conns_by_type)} connector types, {derived_conn_count} "
+        f"derived from data streams for families ssot/connections cannot enumerate"
     )
 
     # ---------- 3.1 DLO inventory (t13)
@@ -848,9 +956,25 @@ def fill(
         if d.get("name")
     }
 
-    def rel_key_qualifier(field_api: str) -> str:
-        # Key qualifiers are not explicitly returned in DMO relationship metadata.
-        # Derive a readable candidate from the field api name.
+    # Authoritative key qualifiers live on the DMO field metadata
+    # (ssot/metadata?entityType=DataModelObject) as an explicit `keyQualifier`
+    # property. Read the real value; only fall back to a derived candidate when
+    # the API does not return one for a given field.
+    dmo_meta_fields: dict[str, dict[str, dict]] = {}
+    for m in meta_dmo:
+        api = m.get("name")
+        if not api:
+            continue
+        dmo_meta_fields[api] = {
+            f.get("name"): f
+            for f in (m.get("fields") or [])
+            if isinstance(f, dict) and f.get("name")
+        }
+
+    def rel_key_qualifier(dmo_api: str, field_api: str) -> str:
+        actual = (dmo_meta_fields.get(dmo_api) or {}).get(field_api, {}).get("keyQualifier")
+        if actual:
+            return actual
         core = (field_api or "").strip()
         if not core:
             return NA
@@ -927,11 +1051,11 @@ def fill(
                     cardinality(r.get("cardinality", "")),
                     dmo_label_by_api.get(r.get("fromEntity", ""), r.get("fromEntity", "")),
                     from_meta.get("label") or from_field,
-                    rel_key_qualifier(from_field),
+                    rel_key_qualifier(r.get("fromEntity", ""), from_field),
                     cardinality(r.get("cardinality", "")) or r.get("cardinality", ""),
                     dmo_label_by_api.get(r.get("toEntity", ""), r.get("toEntity", "")),
                     to_meta.get("label") or to_field,
-                    rel_key_qualifier(to_field),
+                    rel_key_qualifier(r.get("toEntity", ""), to_field),
                 )
             )
     rel_rows.sort(key=lambda x: (x[0], x[1]))
@@ -1387,7 +1511,7 @@ def fill(
     api = prov.get("apiVersion", "")
     prov_rows = [
         ("Data space & scope", "ssot/data-spaces, ssot/data-spaces/{name}/members", "data-spaces.json, data-space-members.json"),
-        ("Streams & connections", "ssot/data-streams?includeMappings=true, ssot/connections", "data-streams.json, connections.json"),
+        ("Streams & connections", "ssot/data-streams?includeMappings=true + Tooling DataStreamDefinition/MktDataLakeObject/MktDataConnection, ssot/connections", "data-streams.json, tooling-data-streams.json, tooling-mkt-dlo.json, tooling-mkt-connection.json, connections.json"),
         ("DLOs", "ssot/data-lake-objects, ssot/metadata?entityType=DataLakeObject", "data-lake-objects.json, metadata-dlo.json"),
         ("DMOs & mappings", "ssot/metadata?entityType=DataModelObject, ssot/data-model-objects, ssot/data-model-object-mappings, Tooling MktDataModelObject", "metadata-dmo.json, data-model-objects-catalogue.json, dmo-mappings.json, tooling-dmo.json"),
         ("IR ruleset", "ssot/identity-resolutions", "identity-resolutions.json"),
@@ -1539,6 +1663,19 @@ def fill(
     for ty, rows in all_conns_by_type.items():
         key = CONNECTION_TO_CATALOG_TYPE.get(ty, ty)
         configured_by_catalog[key] = configured_by_catalog.get(key, 0) + len(rows or [])
+    # Connector families that ssot/connections cannot enumerate (e.g. Marketing
+    # Cloud Personalization) are still provably configured if an org-wide data
+    # stream uses them. Count distinct connector ids per type from the Tooling
+    # DataStreamDefinition list so those families are marked configured.
+    stream_conn_ids: dict[str, set] = {}
+    for ts in records("tooling-data-streams"):
+        cty = ts.get("DataConnectorType")
+        cid = ts.get("DataConnectorId")
+        if cty and cid:
+            stream_conn_ids.setdefault(CONNECTION_TO_CATALOG_TYPE.get(cty, cty), set()).add(cid)
+    for key, ids in stream_conn_ids.items():
+        if not configured_by_catalog.get(key):
+            configured_by_catalog[key] = len(ids)
     catalog_names = {
         first(c, "name", "connectorType", default="") for c in connector_catalog
     }
@@ -1574,7 +1711,7 @@ def fill(
     counts["Tier 3 connector catalog"] = (
         f"{len(connector_catalog_rows)} connector families available (ssot/connectors); "
         f"{sum(1 for r in connector_catalog_rows if r[3] == 'Yes')} configured in this org "
-        f"(configured counts from ssot/connections, not inferred)"
+        f"(configured counts from ssot/connections and Tooling data streams, not inferred)"
     )
 
     tier3 = {

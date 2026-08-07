@@ -93,6 +93,17 @@ DMO_CATALOGUE_SOQL = (
     "FROM MktDataModelObject"
 )
 
+# ssot/data-streams only returns streams visible in the caller's default data
+# space context, so it misses streams that live in other spaces (e.g. Marketing
+# Cloud and Marketing Cloud Personalization ingestion). The Tooling API
+# DataStreamDefinition object is the authoritative, org-wide list of every data
+# stream across every data space. We fetch both and merge at fill time.
+DATA_STREAM_DEF_SOQL = (
+    "SELECT Id, DeveloperName, MasterLabel, DataConnectorType, DataConnectorId, "
+    "MktDataLakeObjectId, CreationType, Description, CreatedDate, LastModifiedDate "
+    "FROM DataStreamDefinition ORDER BY MasterLabel"
+)
+
 
 def resolve_sf_cli() -> str:
     for candidate in ("sf", "sf.cmd", "sf.exe"):
@@ -555,6 +566,24 @@ def main() -> None:
         (
             "data-streams",
             lambda: org.page_by_offset("ssot/data-streams", {"includeMappings": "true"}),
+        ),
+        # Authoritative, org-wide stream list across every data space (Tooling API).
+        # ssot/data-streams above only sees the default-space context and misses
+        # streams from other spaces (Marketing Cloud, MC Personalization, etc.).
+        ("tooling-data-streams", lambda: org.query(DATA_STREAM_DEF_SOQL, tooling=True)),
+        # Resolves a Tooling stream's MktDataLakeObjectId to a DLO developer name.
+        (
+            "tooling-mkt-dlo",
+            lambda: org.query("SELECT Id, DeveloperName FROM MktDataLakeObject", tooling=True),
+        ),
+        # Connection labels for connector families that ssot/connections cannot
+        # enumerate (e.g. SalesforceInteractionStudio / MC Personalization).
+        (
+            "tooling-mkt-connection",
+            lambda: org.query(
+                "SELECT Id, MasterLabel, ConnectionMethod, CreatedDate FROM MktDataConnection",
+                tooling=True,
+            ),
         ),
         # Caps at 20 per page whatever limit says, but reports totalSize.
         ("data-lake-objects", lambda: org.page_by_total("ssot/data-lake-objects", 20)),
