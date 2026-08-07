@@ -779,8 +779,8 @@ python -u scripts/fetch_live.py --clean-cache --workers 4 --max-retries 2 --retr
 
 Notes:
 
-- The fetch logic now sets `SF_TEMP_SHOW_SECRETS=true` automatically for its own CLI calls and retries `sf org display --json` / `--verbose --json`, so token redaction on modern CLI versions is handled for you — no manual env export needed.
-- If you still see "did not return a usable access token", the error message lists the exact fixes in order: (1) `sf org login web --alias <alias>`, (2) confirm the active org with `sf config get target-org`, (3) update the CLI with `npm install --global @salesforce/cli@latest`.
+- Reading the access token from `sf org display` is deprecated and recent CLIs redact it. The fetch logic now uses the supported dedicated command `sf org auth show-access-token --json` to retrieve the token, and reads `instanceUrl`/org id from `sf org display --json` (those fields are not secrets). Older CLIs without `org auth show-access-token` fall back to the display path (with `SF_TEMP_SHOW_SECRETS=true` set automatically) — no manual env export needed.
+- If you still see "did not return a usable access token", the error message lists the exact fixes in order: (1) `sf org login web --alias <alias>`, (2) confirm the active org with `sf config get target-org`, (3) update the CLI with `npm install --global @salesforce/cli@latest`, (4) sanity-check with `sf org auth show-access-token --json`.
 
 ### 429/rate-limit behavior
 

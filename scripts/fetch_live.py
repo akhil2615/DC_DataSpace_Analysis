@@ -1,10 +1,11 @@
 """Fetch every Data Cloud metadata endpoint needed for the analysis record into a JSON cache.
 
 One command, one pass. Auth comes from the Salesforce CLI default org.
-The fetcher first tries `sf org display --json`; modern CLIs redact the access
-token unless SF_TEMP_SHOW_SECRETS=true is set, so it automatically retries with
-that env var (and `--verbose`) to retrieve a usable token without the user
-having to export anything.
+Reading the token from `sf org display` is deprecated and recent CLIs redact it,
+so the token is retrieved with the supported `sf org auth show-access-token
+--json` command; instanceUrl and org id (not secrets) come from `sf org display
+--json`. Older CLIs without that command fall back to display output with
+SF_TEMP_SHOW_SECRETS=true set automatically, so no manual export is needed.
 Org id, instance and fetch timestamp go to _provenance.json so the fill step can
 prove provenance.
 
@@ -121,119 +122,103 @@ def resolve_sf_cli() -> str:
 
 
 def cli_auth(target_org: str | None = None) -> tuple[str, str, str]:
+    """Resolve an access token, instance URL and org id from the Salesforce CLI.
+
+    Salesforce deprecated reading the access token from `sf org display`; recent
+    CLIs redact it there. The supported way to retrieve a token programmatically
+    is the dedicated `sf org auth show-access-token --json` command (the --json
+    flag also skips its interactive security prompt). That command returns ONLY
+    the token, so instanceUrl and org id still come from `sf org display --json`
+    (those fields are not secrets and are never redacted).
+
+    Strategy, resilient across CLI versions:
+      1. `sf org display --json`         -> instanceUrl + org id (+ token on old CLIs)
+      2. `sf org auth show-access-token` -> token on current CLIs (primary)
+      3. legacy fallback                 -> token from display with SF_TEMP_SHOW_SECRETS
+    """
     sf_cli = resolve_sf_cli()
     target_args = ["--target-org", target_org] if target_org else []
-
-    def run_and_parse(args: list[str], label: str, extra_env: dict | None = None) -> dict:
-        # Modern Salesforce CLI redacts the access token from `sf org display`
-        # UNLESS SF_TEMP_SHOW_SECRETS=true is present in the environment. We set it
-        # for the subprocess so the user does not have to export it by hand.
-        env = dict(os.environ)
-        if extra_env:
-            env.update(extra_env)
-        out = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=180,
-            env=env,
-        )
-        stdout = (out.stdout or "").strip()
-        stderr = (out.stderr or "").strip()
-        if out.returncode != 0:
-            raise RuntimeError(
-                f"Salesforce CLI auth check failed for '{label}'. "
-                f"exit={out.returncode} stderr={stderr or '<empty>'} stdout={stdout or '<empty>'}"
-            )
-        if not stdout:
-            raise RuntimeError(
-                f"Salesforce CLI returned empty stdout for '{label}'. "
-                f"stderr={stderr or '<empty>'}"
-            )
-        try:
-            body = json.loads(stdout)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Unable to parse JSON from '{label}'. "
-                f"stdout={stdout[:500]} stderr={stderr[:500]}"
-            ) from exc
-        return body.get("result") or {}
+    show_secrets = {"SF_TEMP_SHOW_SECRETS": "true", "SFDX_TEMP_SHOW_SECRETS": "true"}
+    errors: list[str] = []
 
     def usable(tok: str) -> bool:
         return bool(tok) and not tok.startswith("[REDACTED]")
 
-    show_secrets = {"SF_TEMP_SHOW_SECRETS": "true", "SFDX_TEMP_SHOW_SECRETS": "true"}
-
-    # Try, in order, the fastest path first and progressively force secrets on.
-    # Newer sf versions redact accessToken unless SF_TEMP_SHOW_SECRETS=true, so we
-    # supply that automatically instead of failing and asking the user to set it.
-    attempts = [
-        ("sf org display --json", [sf_cli, "org", "display", "--json", *target_args], None),
-        (
-            "sf org display --json (SF_TEMP_SHOW_SECRETS=true)",
-            [sf_cli, "org", "display", "--json", *target_args],
-            show_secrets,
-        ),
-        (
-            "sf org display --verbose --json (SF_TEMP_SHOW_SECRETS=true)",
-            [sf_cli, "org", "display", "--verbose", "--json", *target_args],
-            show_secrets,
-        ),
-    ]
-
-    res: dict = {}
-    token = ""
-    errors: list[str] = []
-    for label, args, extra_env in attempts:
+    def run_json(args: list[str], label: str, extra_env: dict | None = None) -> dict | None:
+        env = dict(os.environ)
+        if extra_env:
+            env.update(extra_env)
         try:
-            candidate = run_and_parse(args, label, extra_env)
-        except RuntimeError as exc:
+            out = subprocess.run(
+                args, capture_output=True, text=True, check=False, timeout=180, env=env
+            )
+        except Exception as exc:  # noqa: BLE001 - report and continue to next fallback
             errors.append(f"- {label}: {exc}")
-            continue
-        # Keep the richest payload we have seen so instanceUrl/id survive even if a
-        # later attempt only adds the token.
-        if candidate:
-            res = {**res, **{k: v for k, v in candidate.items() if v not in (None, "")}}
-        tok = (candidate.get("accessToken") or "").strip()
+            return None
+        stdout = (out.stdout or "").strip()
+        stderr = (out.stderr or "").strip()
+        if out.returncode != 0 or not stdout:
+            errors.append(
+                f"- {label}: exit={out.returncode} "
+                f"stderr={stderr or '<empty>'} stdout={stdout[:200] or '<empty>'}"
+            )
+            return None
+        try:
+            return json.loads(stdout).get("result") or {}
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"- {label}: unparseable JSON ({exc}) stdout={stdout[:200]}")
+            return None
+
+    # 1) org display: authoritative for instanceUrl + org id (non-secret fields).
+    disp = run_json(
+        [sf_cli, "org", "display", "--json", *target_args],
+        "sf org display --json",
+        show_secrets,
+    ) or {}
+    instance = (disp.get("instanceUrl") or "").rstrip("/")
+    org_id = disp.get("id") or ""
+
+    # 2) Preferred: the dedicated token command on current CLIs. --json also skips
+    #    the interactive "reveal token?" confirmation prompt.
+    token = ""
+    at = run_json(
+        [sf_cli, "org", "auth", "show-access-token", "--json", "--no-prompt", *target_args],
+        "sf org auth show-access-token --json",
+    )
+    if isinstance(at, dict):
+        token = (at.get("accessToken") or "").strip()
+
+    # 3) Legacy fallback for CLIs without `org auth show-access-token`: read the
+    #    token straight from display output (works when secrets are not redacted).
+    if not usable(token):
+        tok = (disp.get("accessToken") or "").strip()
         if usable(tok):
             token = tok
-            break
-
-    # Last resort: the dedicated token command available on newer CLIs.
     if not usable(token):
-        for cmd in (
-            [sf_cli, "org", "display", "--json", "--verbose", *target_args],
-            [sf_cli, "force", "org", "display", "--json", "--verbose", *target_args],
-        ):
-            try:
-                candidate = run_and_parse(cmd, " ".join(cmd[1:4]), show_secrets)
-            except RuntimeError as exc:
-                errors.append(f"- {' '.join(cmd[1:])}: {exc}")
-                continue
-            if candidate:
-                res = {**res, **{k: v for k, v in candidate.items() if v not in (None, "")}}
-            tok = (candidate.get("accessToken") or "").strip()
-            if usable(tok):
-                token = tok
-                break
+        verbose = run_json(
+            [sf_cli, "org", "display", "--verbose", "--json", *target_args],
+            "sf org display --verbose --json",
+            show_secrets,
+        ) or {}
+        tok = (verbose.get("accessToken") or "").strip()
+        if usable(tok):
+            token = tok
 
     if not usable(token):
         detail = "\n".join(errors) if errors else "<no CLI errors captured>"
         raise RuntimeError(
             "Salesforce CLI did not return a usable access token.\n"
             "Fixes, in order of likelihood:\n"
-            "  1. Re-authenticate this org: sf org login web --alias <alias>\n"
-            "  2. Make sure the right org is active: sf config get target-org  (set with\n"
-            "     'sf config set target-org <alias> --global')\n"
-            "  3. Update the CLI: npm install --global @salesforce/cli@latest\n"
-            "  4. If tokens are still redacted, export SF_TEMP_SHOW_SECRETS=true in your\n"
-            "     shell and re-run (the app already tries this automatically).\n"
+            "  1. Re-authenticate this org:  sf org login web --alias <alias>\n"
+            "  2. Confirm the right org is active:  sf config get target-org\n"
+            "     (set it with 'sf config set target-org <alias> --global')\n"
+            "  3. Update the CLI so it has 'org auth show-access-token':\n"
+            "        npm install --global @salesforce/cli@latest\n"
+            "  4. Sanity check by hand:\n"
+            "        sf org auth show-access-token --json\n"
             f"CLI attempts made:\n{detail}"
         )
 
-    instance = (res.get("instanceUrl") or "").rstrip("/")
-    org_id = res.get("id") or ""
     if not instance or not org_id:
         raise RuntimeError(
             "Salesforce CLI did not return instanceUrl/org id. "
