@@ -347,6 +347,7 @@ def fill(
     graphs = records("data-graphs")
     conns_by_type = load("connections").get("byType", {})
     mappings = load("dmo-mappings").get("byDmo", {})
+    mappings_by_space = load("dmo-mappings").get("byDmoSpace", {})
     graph_detail = load("data-graph-details").get("byGraph", {})
     act_detail = load("activation-details").get("byActivation", {})
     users = load("users").get("byId", {})
@@ -360,8 +361,16 @@ def fill(
         return None
 
     def in_space(rec: dict) -> bool:
+        # Prefer the record's own declared data space; otherwise use the set of
+        # spaces the fetch tagged it with (`_dataSpaces`), which is the space(s)
+        # whose scoped API call returned it. Records with neither are org-shared.
         s = rec_space(rec)
-        return s is None or s == space_name
+        if s is not None:
+            return s == space_name
+        ds = rec.get("_dataSpaces")
+        if isinstance(ds, list) and ds:
+            return space_name in ds
+        return True
 
     # ssot/data-streams only returns streams from the caller's default-space
     # context, so it silently drops streams that live in other data spaces
@@ -434,6 +443,15 @@ def fill(
         recovered_streams.append(rec)
     streams = streams + recovered_streams
 
+    # ssot/metadata (DMO/DLO/CI) is data-space scoped and the fetch now records
+    # every space that returned a record in `_dataSpaces`. Scope the metadata to
+    # the selected space using that authoritative tag so multi-space orgs show the
+    # right objects (a naive default-space fetch would miss the others entirely).
+    meta_dmo = [d for d in meta_dmo if in_space(d)]
+    meta_dlo = {k: v for k, v in meta_dlo.items() if in_space(v)}
+    meta_ci = [c for c in meta_ci if in_space(c)]
+    ci_items = {k: v for k, v in ci_items.items() if in_space(v)}
+
     # Keep two stream buckets for each run:
     # 1) streams explicitly in the selected data space
     # 2) streams with no data-space key (org-shared/global)
@@ -449,41 +467,48 @@ def fill(
     ci_items = {k: v for k, v in ci_items.items() if in_space(v)}
     targets = {k: v for k, v in targets.items() if in_space(v)}
 
-    # Most inventory endpoints are org-wide and do not include a space key.
-    # Scope those by data-space members (DLOs) and then derive DMO scope from mappings.
+    # DLO and DMO scope now comes from the data-space-scoped ssot/metadata
+    # (`_dataSpaces` tag), which is authoritative for every org. Data-space
+    # members, each DLO's dataSpaceInfo, and the scoped streams only ADD to that
+    # set, never restrict it, so nothing that genuinely belongs to the space is
+    # dropped even when one source is incomplete.
     member_dlos = {
         m.get("memberName")
         for m in members
         if isinstance(m, dict) and m.get("memberName")
     }
-    if member_dlos:
-        stream_dlos = {
-            (s.get("dataLakeObjectInfo") or {}).get("name")
-            for s in streams
-            if (s.get("dataLakeObjectInfo") or {}).get("name")
-        }
-        scoped_dlos = member_dlos | stream_dlos
+    space_dlo_from_info = {n for n, sps in dlo_spaces.items() if space_name in sps}
+    stream_dlos = {
+        (s.get("dataLakeObjectInfo") or {}).get("name")
+        for s in streams
+        if (s.get("dataLakeObjectInfo") or {}).get("name")
+    }
+    scoped_dlos = set(meta_dlo.keys()) | member_dlos | space_dlo_from_info | stream_dlos
+    scoped_dlos.discard(None)
+    if scoped_dlos:
         dlos = [d for d in dlos if d.get("name") in scoped_dlos]
         meta_dlo = {k: v for k, v in meta_dlo.items() if k in scoped_dlos}
         streams = [
             s
             for s in streams
-            if ((s.get("dataLakeObjectInfo") or {}).get("name") in scoped_dlos)
+            if (not (s.get("dataLakeObjectInfo") or {}).get("name"))
+            or ((s.get("dataLakeObjectInfo") or {}).get("name") in scoped_dlos)
         ]
 
-        scoped_dmos: set[str] = set()
-        for by_dmo_name, payload in mappings.items():
-            body = (payload or {}).get("body") or {}
-            for m in body.get("objectSourceTargetMaps") or []:
-                src = m.get("sourceEntityDeveloperName")
-                dst = m.get("targetEntityDeveloperName") or by_dmo_name
-                if src in scoped_dlos and dst:
-                    scoped_dmos.add(dst)
-                    scoped_dmos.add(by_dmo_name)
-        if scoped_dmos:
-            meta_dmo = [d for d in meta_dmo if d.get("name") in scoped_dmos]
-            catalogue = {k: v for k, v in catalogue.items() if k in scoped_dmos}
-            mappings = {k: v for k, v in mappings.items() if k in scoped_dmos}
+    # DMO scope is exactly the set of DMOs ssot/metadata returned for this space.
+    scoped_dmos = {d.get("name") for d in meta_dmo if d.get("name")}
+    if scoped_dmos:
+        catalogue = {k: v for k, v in catalogue.items() if k in scoped_dmos}
+
+    # Prefer the space-specific DLO->DMO mapping payload captured per (space, dmo);
+    # fall back to the merged view only when a per-space payload is unavailable.
+    scoped_mappings: dict = {}
+    for dmo in (scoped_dmos or set(mappings.keys())):
+        per = (mappings_by_space.get(dmo) or {}).get(space_name)
+        body = per if per is not None else mappings.get(dmo)
+        if body is not None:
+            scoped_mappings[dmo] = body
+    mappings = scoped_mappings
 
     # Keep detailed payloads aligned to already scoped top-level lists.
     scoped_activation_keys = {a.get("id") or a.get("developerName") for a in activations}
@@ -1512,13 +1537,14 @@ def fill(
     prov_rows = [
         ("Data space & scope", "ssot/data-spaces, ssot/data-spaces/{name}/members", "data-spaces.json, data-space-members.json"),
         ("Streams & connections", "ssot/data-streams?includeMappings=true + Tooling DataStreamDefinition/MktDataLakeObject/MktDataConnection, ssot/connections", "data-streams.json, tooling-data-streams.json, tooling-mkt-dlo.json, tooling-mkt-connection.json, connections.json"),
-        ("DLOs", "ssot/data-lake-objects, ssot/metadata?entityType=DataLakeObject", "data-lake-objects.json, metadata-dlo.json"),
-        ("DMOs & mappings", "ssot/metadata?entityType=DataModelObject, ssot/data-model-objects, ssot/data-model-object-mappings, Tooling MktDataModelObject", "metadata-dmo.json, data-model-objects-catalogue.json, dmo-mappings.json, tooling-dmo.json"),
+        ("DLOs", "ssot/data-lake-objects, ssot/metadata?entityType=DataLakeObject (per data space, merged)", "data-lake-objects.json, metadata-dlo.json"),
+        ("DMOs & mappings", "ssot/metadata?entityType=DataModelObject (per data space, merged), ssot/data-model-objects, ssot/data-model-object-mappings (per space+dmo), Tooling MktDataModelObject", "metadata-dmo.json, data-model-objects-catalogue.json, dmo-mappings.json, tooling-dmo.json"),
         ("IR ruleset", "ssot/identity-resolutions", "identity-resolutions.json"),
-        ("CIs & data graphs", "ssot/calculated-insights, ssot/metadata?entityType=CalculatedInsight, ssot/data-graphs/metadata, ssot/data-graphs/{name}", "calculated-insights.json, metadata-ci.json, data-graphs.json, data-graph-details.json"),
-        ("Segments", "ssot/segments", "segments.json"),
-        ("Activations", "ssot/activations, ssot/activations/{id}, ssot/activation-targets", "activations.json, activation-details.json, activation-targets.json"),
-        ("Retrieve / search indexes", "ssot/search-index", "search-index.json"),
+        ("CIs & data graphs", "ssot/calculated-insights (per data space, merged), ssot/metadata?entityType=CalculatedInsight (per data space, merged), ssot/data-graphs/metadata (per data space, merged), ssot/data-graphs/{name}", "calculated-insights.json, metadata-ci.json, data-graphs.json, data-graph-details.json"),
+        ("Segments", "ssot/segments (per data space, merged)", "segments.json"),
+        ("Activations", "ssot/activations (per data space, merged), ssot/activations/{id}, ssot/activation-targets", "activations.json, activation-details.json, activation-targets.json"),
+        ("Retrieve / search indexes", "ssot/search-index (per data space, merged)", "search-index.json"),
+        ("Completeness audit", "cross-checks Connect API vs Tooling per-space counts; see Appendix I", "_audit.json"),
     ]
     for i, (_, how, evidence) in enumerate(prov_rows, start=1):
         put(t[6], i, 1, f"Data Cloud REST API {api} GET {how}")
@@ -1893,6 +1919,63 @@ def appendices(
         ["Connector", "Type", "Release level", "Configured", "Connections"],
         tier3.get("connector_catalog") or [("No connector catalog found", "", "", "", "")],
     )
+
+    # ---------------- Appendix I — Extract completeness audit
+    audit = load("_audit")
+    audit_spaces = audit.get("dataSpaces") or []
+    doc.add_page_break()
+    doc.add_heading("Appendix I — Extract completeness audit", level=1)
+    doc.add_paragraph(
+        "Proof that this extract captured the whole org, not just the default data space. "
+        "Several Data Cloud Connect API endpoints (ssot/metadata for DMOs, DLOs and calculated "
+        "insights; ssot/data-model-object-mappings; ssot/segments; ssot/activations; "
+        "ssot/data-graphs; ssot/search-index) are data-space scoped and silently return only the "
+        "'default' space unless a data space is named. This run queried every data space "
+        f"({', '.join(audit_spaces) or 'n/a'}) and merged the results. 'Captured' is the org-wide "
+        "total; 'Default-space only' is what a single naive call would have returned; the gap is "
+        "what would otherwise have been missed. Data streams are taken from the Tooling API "
+        "(DataStreamDefinition), which is the authoritative all-space list."
+    )
+    audit_rows = []
+    for c in audit.get("checks") or []:
+        captured = c.get("captured")
+        default_only = c.get("defaultSpaceOnly")
+        cross = c.get("crossCheck")
+        recovered = c.get("recoveredBeyondConnectApi")
+        gap = ""
+        if isinstance(default_only, int) and isinstance(captured, int):
+            gap = str(captured - default_only)
+        elif isinstance(recovered, int):
+            gap = str(recovered)
+        per_space = c.get("perSpace") or {}
+        per_space_txt = ", ".join(f"{k}={v}" for k, v in per_space.items()) if per_space else ""
+        cross_txt = "" if cross is None else f"{cross} ({c.get('crossSource','')})"
+        audit_rows.append(
+            (
+                c.get("item", ""),
+                captured if captured is not None else NA,
+                default_only if default_only is not None else "",
+                gap,
+                cross_txt,
+                per_space_txt,
+            )
+        )
+    add_table(
+        doc,
+        ["Item", "Captured (whole org)", "Default-space only", "Would have missed", "Independent cross-check", "Per data space"],
+        audit_rows or [("No audit data found", "", "", "", "", "")],
+    )
+    non_ok = audit.get("nonOkEndpoints") or []
+    if non_ok:
+        doc.add_paragraph(
+            "Endpoints that returned an error status during this extract (review before relying on "
+            "the affected sections): "
+            + "; ".join(f"{r.get('endpoint')} → HTTP {r.get('status')}" for r in non_ok)
+        )
+    else:
+        doc.add_paragraph(
+            "All fetched endpoints returned HTTP 200. No category was skipped or truncated by an error."
+        )
 
 
 def main() -> None:

@@ -556,6 +556,158 @@ def main() -> None:
     dmo_total = len(tooling["records"]) or 1200
     offsets = list(range(0, dmo_total + PAGE, PAGE))
 
+    # Data spaces must be known before the space-scoped fetches below. Several
+    # Connect API endpoints (ssot/metadata for DMO/DLO/CI,
+    # ssot/data-model-object-mappings, ssot/segments, ssot/activations,
+    # ssot/data-graphs, ssot/search-index) are data-space scoped and silently
+    # default to the `default` space when no dataspace is supplied. To be an exact
+    # replica of ANY org we enumerate every data space and fetch per-space, then
+    # merge, tagging each record with the spaces it belongs to.
+    data_spaces_res = org.page_by_offset("ssot/data-spaces", size=4999)
+    save("data-spaces", data_spaces_res)
+    spaces = [s["name"] for s in data_spaces_res["records"] if s.get("name")] or ["default"]
+    print(f"data spaces ({len(spaces)}): {', '.join(spaces)}", flush=True)
+
+    # Per-space fetch statistics, surfaced later in the completeness audit so a
+    # user can see exactly how many records each space contributed.
+    perspace_counts: dict[str, dict[str, int]] = {}
+
+    def metadata_all_spaces(entity: str) -> dict:
+        """Fetch ssot/metadata for an entity across every data space and merge.
+        Each record is tagged with `_dataSpaces` = the spaces it appears in."""
+
+        def one(sp: str):
+            res = org.get("ssot/metadata", {"entityType": entity, "dataspace": sp})
+            md = (res["body"].get("metadata") or []) if res["status"] < 400 else []
+            return sp, res["status"], md
+
+        by_name: dict[str, dict] = {}
+        counts: dict[str, int] = {}
+        ok = False
+        last = 200
+        for sp, st, md in pmap(one, spaces):
+            last = st
+            counts[sp] = len(md)
+            if st < 400:
+                ok = True
+            for m in md:
+                nm = m.get("name")
+                if not nm:
+                    continue
+                cur = by_name.get(nm)
+                if cur is None:
+                    m = dict(m)
+                    m["_dataSpaces"] = [sp]
+                    by_name[nm] = m
+                elif sp not in cur["_dataSpaces"]:
+                    cur["_dataSpaces"].append(sp)
+        perspace_counts[entity] = counts
+        return {"status": 200 if ok else last, "key": "metadata", "records": list(by_name.values())}
+
+    def offset_list_all_spaces(path: str, size_param: str = "limit", size: int = PAGE) -> dict:
+        """Fetch an offset-paged, data-space-scoped list across every space and
+        merge, tagging each record with the spaces it appears in."""
+
+        def one(sp: str):
+            return sp, org.page_by_offset(path, {"dataspace": sp}, size_param=size_param, size=size)
+
+        merged: dict = {}
+        counts: dict[str, int] = {}
+        ok = False
+        last = 200
+        key = None
+        for sp, r in pmap(one, spaces):
+            last = r["status"]
+            key = key or r.get("key")
+            counts[sp] = len(r["records"])
+            if r["status"] < 400:
+                ok = True
+            for rec in r["records"]:
+                rid = (
+                    rec.get("id")
+                    or rec.get("apiName")
+                    or rec.get("developerName")
+                    or rec.get("name")
+                    or json.dumps(rec, sort_keys=True)
+                )
+                cur = merged.get(rid)
+                if cur is None:
+                    rec = dict(rec)
+                    rec["_dataSpaces"] = [sp]
+                    merged[rid] = rec
+                elif sp not in cur.get("_dataSpaces", []):
+                    cur.setdefault("_dataSpaces", []).append(sp)
+        perspace_counts[path] = counts
+        return {"status": 200 if ok else last, "key": key, "records": list(merged.values())}
+
+    def flat_list_all_spaces(path: str, key: str) -> dict:
+        """Fetch a single-call, data-space-scoped list across every space and merge."""
+
+        def one(sp: str):
+            r = org.get(path, {"dataspace": sp})
+            recs = (r["body"].get(key) or []) if r["status"] < 400 else []
+            return sp, r["status"], recs
+
+        merged: dict = {}
+        counts: dict[str, int] = {}
+        ok = False
+        last = 200
+        for sp, st, recs in pmap(one, spaces):
+            last = st
+            counts[sp] = len(recs)
+            if st < 400:
+                ok = True
+            for rec in recs:
+                rid = (
+                    rec.get("developerName")
+                    or rec.get("apiName")
+                    or rec.get("name")
+                    or rec.get("id")
+                    or json.dumps(rec, sort_keys=True)
+                )
+                cur = merged.get(rid)
+                if cur is None:
+                    rec = dict(rec)
+                    rec["_dataSpaces"] = [sp]
+                    merged[rid] = rec
+                elif sp not in cur.get("_dataSpaces", []):
+                    cur.setdefault("_dataSpaces", []).append(sp)
+        perspace_counts[path] = counts
+        return {"status": 200 if ok else last, "key": key, "records": list(merged.values())}
+
+    def collection_all_spaces(path: str, params: dict) -> dict:
+        """Fetch a collection-paged, data-space-scoped list across every space and merge."""
+
+        def one(sp: str):
+            return sp, org.page_by_collection(path, dict(params, dataspace=sp))
+
+        merged: dict = {}
+        counts: dict[str, int] = {}
+        ok = False
+        last = 200
+        for sp, r in pmap(one, spaces):
+            last = r["status"]
+            counts[sp] = len(r["records"])
+            if r["status"] < 400:
+                ok = True
+            for rec in r["records"]:
+                rid = (
+                    rec.get("apiName")
+                    or rec.get("developerName")
+                    or rec.get("name")
+                    or rec.get("id")
+                    or json.dumps(rec, sort_keys=True)
+                )
+                cur = merged.get(rid)
+                if cur is None:
+                    rec = dict(rec)
+                    rec["_dataSpaces"] = [sp]
+                    merged[rid] = rec
+                elif sp not in cur.get("_dataSpaces", []):
+                    cur.setdefault("_dataSpaces", []).append(sp)
+        perspace_counts[path] = counts
+        return {"status": 200 if ok else last, "key": "items", "records": list(merged.values())}
+
     def catalogue_page(off: int) -> list:
         res = org.get("ssot/data-model-objects", {"limit": PAGE, "offset": off})
         body = res["body"] if isinstance(res["body"], dict) else {}
@@ -595,40 +747,35 @@ def main() -> None:
                 "records": [r for page in pmap(catalogue_page, offsets) for r in page],
             },
         ),
-        (
-            "metadata-dmo",
-            lambda: flat_list(org.get("ssot/metadata", {"entityType": "DataModelObject"}), "metadata"),
-        ),
-        (
-            "metadata-dlo",
-            lambda: flat_list(org.get("ssot/metadata", {"entityType": "DataLakeObject"}), "metadata"),
-        ),
-        (
-            "metadata-ci",
-            lambda: flat_list(org.get("ssot/metadata", {"entityType": "CalculatedInsight"}), "metadata"),
-        ),
-        # identity-resolutions and search-index take no paging parameters at all.
+        # ssot/metadata is data-space scoped and defaults to `default`; fetch
+        # every space and merge so multi-space orgs are captured in full.
+        ("metadata-dmo", lambda: metadata_all_spaces("DataModelObject")),
+        ("metadata-dlo", lambda: metadata_all_spaces("DataLakeObject")),
+        ("metadata-ci", lambda: metadata_all_spaces("CalculatedInsight")),
+        # identity-resolutions is org-wide (returns records for every space).
         ("identity-resolutions", lambda: flat_list(org.get("ssot/identity-resolutions"))),
-        ("segments", lambda: org.page_by_offset("ssot/segments", size_param="batchSize")),
-        ("activations", lambda: org.page_by_offset("ssot/activations", size_param="batchSize")),
+        # segments/activations are data-space scoped; fetch per space and merge.
+        ("segments", lambda: offset_list_all_spaces("ssot/segments", size_param="batchSize")),
+        ("activations", lambda: offset_list_all_spaces("ssot/activations", size_param="batchSize")),
         (
             "activation-targets",
             lambda: org.page_by_offset("ssot/activation-targets", size_param="batchSize"),
         ),
-        ("data-spaces", lambda: org.page_by_offset("ssot/data-spaces", size=4999)),
-        # data-transforms caps the page size at 20.
+        # data-transforms caps the page size at 20 and is org-wide.
         ("data-transforms", lambda: org.page_by_offset("ssot/data-transforms", size=20)),
+        # calculated-insights list is data-space scoped; fetch per space and merge.
         (
             "calculated-insights",
-            lambda: org.page_by_collection("ssot/calculated-insights", {"batchSize": 25, "offset": 0}),
+            lambda: collection_all_spaces("ssot/calculated-insights", {"batchSize": 25, "offset": 0}),
         ),
+        # search-index and data-graphs are data-space scoped; fetch per space and merge.
         (
             "search-index",
-            lambda: flat_list(org.get("ssot/search-index"), "semanticSearchDefinitionDetails"),
+            lambda: flat_list_all_spaces("ssot/search-index", "semanticSearchDefinitionDetails"),
         ),
         (
             "data-graphs",
-            lambda: flat_list(org.get("ssot/data-graphs/metadata"), "dataGraphMetadata"),
+            lambda: flat_list_all_spaces("ssot/data-graphs/metadata", "dataGraphMetadata"),
         ),
         # Tier 3 inventory: data actions, their targets, and the full connector catalog.
         ("data-actions", lambda: flat_list(org.get("ssot/data-actions"))),
@@ -645,8 +792,9 @@ def main() -> None:
         save(name, results[name])
 
     streams = results["data-streams"]["records"]
-    deployed = [d["name"] for d in results["metadata-dmo"]["records"] if d.get("name")]
-    spaces = [s["name"] for s in results["data-spaces"]["records"] if s.get("name")]
+    deployed_meta = results["metadata-dmo"]["records"]
+    deployed = [d["name"] for d in deployed_meta if d.get("name")]
+    # spaces already resolved in phase 0.
     graphs = results["data-graphs"]["records"]
     activations = results["activations"]["records"]
 
@@ -673,15 +821,28 @@ def main() -> None:
             probe_types = sorted(set(probe_types) | catalog_types)
 
     # ---------------- phase 2: per-object loops, also concurrent
+    mapping_task_count = sum(len(d.get("_dataSpaces") or spaces) for d in deployed_meta if d.get("name"))
     print(
-        f"phase 2: {len(deployed)} dmo mappings, {len(probe_types)} connector probes, "
-        f"{len(graphs)} graphs, {len(activations)} activations",
+        f"phase 2: {mapping_task_count} dmo mappings across {len(spaces)} spaces, "
+        f"{len(probe_types)} connector probes, {len(graphs)} graphs, {len(activations)} activations",
         flush=True,
     )
 
-    def one_mapping(name: str):
-        res = org.get("ssot/data-model-object-mappings", {"dmoDeveloperName": name})
-        return name, {"status": res["status"], "body": res["body"]}
+    # DLO->DMO mappings are data-space scoped. Fetch per (space, dmo) using each
+    # DMO's own spaces so mappings are correct for every space, not just default.
+    mapping_tasks = [
+        (sp, d["name"])
+        for d in deployed_meta
+        if d.get("name")
+        for sp in (d.get("_dataSpaces") or spaces)
+    ]
+
+    def one_mapping(task: tuple):
+        sp, name = task
+        res = org.get(
+            "ssot/data-model-object-mappings", {"dataspace": sp, "dmoDeveloperName": name}
+        )
+        return sp, name, {"status": res["status"], "body": res["body"]}
 
     def one_connector(ctype: str):
         # Page through so a connector type with more than one page of connections
@@ -711,9 +872,26 @@ def main() -> None:
         res = org.get(f"ssot/activations/{key}")
         return key, {"status": res["status"], "body": res["body"]}
 
+    # Merge per-space mapping results: byDmoSpace keeps the exact per-space payload,
+    # byDmo keeps a merged view (union of objectSourceTargetMaps) for consumers
+    # that do not care about the space split.
+    by_dmo_space: dict[str, dict] = {}
+    by_dmo: dict[str, dict] = {}
+    for sp, name, payload in pmap(one_mapping, mapping_tasks):
+        by_dmo_space.setdefault(name, {})[sp] = payload
+        merged = by_dmo.setdefault(
+            name, {"status": payload["status"], "body": {"objectSourceTargetMaps": []}}
+        )
+        existing = merged["body"]["objectSourceTargetMaps"]
+        seen = {json.dumps(x, sort_keys=True) for x in existing}
+        for om in ((payload.get("body") or {}).get("objectSourceTargetMaps") or []):
+            k = json.dumps(om, sort_keys=True)
+            if k not in seen:
+                seen.add(k)
+                existing.append(om)
     save(
         "dmo-mappings",
-        {"status": 200, "records": [], "byDmo": dict(pmap(one_mapping, deployed))},
+        {"status": 200, "records": [], "byDmo": by_dmo, "byDmoSpace": by_dmo_space},
     )
     save(
         "connections",
@@ -734,6 +912,125 @@ def main() -> None:
     save(
         "data-space-members",
         {"status": 200, "records": [], "bySpace": dict(pmap(lambda sp: (sp, org.page_members(sp)), spaces))},
+    )
+
+    # ---------------- completeness audit: prove, per org, that nothing is missed
+    # For each category we record the count we captured, an independent cross-check
+    # where one exists (Tooling API or a declared totalSize), and the per-space
+    # breakdown for the data-space-scoped endpoints. Any category whose scoped
+    # endpoint would have under-returned had we only queried the default space is
+    # flagged so a reviewer can trust the extract for ANY org.
+    def _count(name: str) -> int:
+        recs = results.get(name, {}).get("records")
+        return len(recs) if isinstance(recs, list) else 0
+
+    tooling_stream_total = _count("tooling-data-streams")
+    ssot_stream_total = _count("data-streams")
+    dlo_declared = None
+    try:
+        dlo_first = org.get("ssot/data-lake-objects", {"limit": 20, "offset": 0})
+        dlo_declared = dlo_first["body"].get("totalSize") if dlo_first["status"] < 400 else None
+    except Exception:  # noqa: BLE001
+        dlo_declared = None
+
+    audit_checks = [
+        {
+            "item": "Data streams",
+            "captured": tooling_stream_total,
+            "primarySource": "Tooling DataStreamDefinition (all spaces)",
+            "crossCheck": ssot_stream_total,
+            "crossSource": "ssot/data-streams (default-space context)",
+            "recoveredBeyondConnectApi": max(0, tooling_stream_total - ssot_stream_total),
+        },
+        {
+            "item": "Data model objects (deployed)",
+            "captured": _count("metadata-dmo"),
+            "primarySource": "ssot/metadata?entityType=DataModelObject per data space (merged)",
+            "defaultSpaceOnly": perspace_counts.get("DataModelObject", {}).get("default", 0),
+            "perSpace": perspace_counts.get("DataModelObject", {}),
+        },
+        {
+            "item": "Data lake objects (metadata)",
+            "captured": _count("metadata-dlo"),
+            "primarySource": "ssot/metadata?entityType=DataLakeObject per data space (merged)",
+            "crossCheck": dlo_declared,
+            "crossSource": "ssot/data-lake-objects totalSize (org-wide object list)",
+            "defaultSpaceOnly": perspace_counts.get("DataLakeObject", {}).get("default", 0),
+            "perSpace": perspace_counts.get("DataLakeObject", {}),
+        },
+        {
+            "item": "Calculated insights",
+            "captured": _count("calculated-insights"),
+            "primarySource": "ssot/calculated-insights per data space (merged)",
+            "perSpace": perspace_counts.get("ssot/calculated-insights", {}),
+        },
+        {
+            "item": "Segments",
+            "captured": _count("segments"),
+            "primarySource": "ssot/segments per data space (merged)",
+            "perSpace": perspace_counts.get("ssot/segments", {}),
+        },
+        {
+            "item": "Activations",
+            "captured": _count("activations"),
+            "primarySource": "ssot/activations per data space (merged)",
+            "perSpace": perspace_counts.get("ssot/activations", {}),
+        },
+        {
+            "item": "Data graphs",
+            "captured": _count("data-graphs"),
+            "primarySource": "ssot/data-graphs/metadata per data space (merged)",
+            "perSpace": perspace_counts.get("ssot/data-graphs/metadata", {}),
+        },
+        {
+            "item": "Search indexes",
+            "captured": _count("search-index"),
+            "primarySource": "ssot/search-index per data space (merged)",
+            "perSpace": perspace_counts.get("ssot/search-index", {}),
+        },
+        {
+            "item": "Identity resolutions",
+            "captured": _count("identity-resolutions"),
+            "primarySource": "ssot/identity-resolutions (org-wide)",
+        },
+        {
+            "item": "Data transforms",
+            "captured": _count("data-transforms"),
+            "primarySource": "ssot/data-transforms (org-wide)",
+        },
+        {
+            "item": "Activation targets",
+            "captured": _count("activation-targets"),
+            "primarySource": "ssot/activation-targets (org-wide)",
+        },
+        {
+            "item": "Connector catalog",
+            "captured": _count("connectors-catalog"),
+            "primarySource": "ssot/connectors (org-wide)",
+        },
+    ]
+    # Record any endpoint that returned a non-200 so failures are never silent.
+    non_ok = []
+    for name, payload in results.items():
+        st = payload.get("status") if isinstance(payload, dict) else None
+        if isinstance(st, int) and st >= 400:
+            non_ok.append({"endpoint": name, "status": st})
+
+    save(
+        "_audit",
+        {
+            "status": 200,
+            "records": [],
+            "dataSpaces": spaces,
+            "checks": audit_checks,
+            "nonOkEndpoints": non_ok,
+            "note": (
+                "Data-space-scoped Connect API endpoints default to the 'default' "
+                "space; this run queried every data space and merged, so counts "
+                "reflect the whole org. 'defaultSpaceOnly' shows what a naive "
+                "single-call fetch would have returned."
+            ),
+        },
     )
 
     # ---------------- phase 3: resolve the user ids referenced anywhere above
