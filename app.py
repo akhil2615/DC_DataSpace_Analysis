@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -89,6 +90,14 @@ def resolve_sf_cli() -> str | None:
     return which("sf") or which("sf.cmd") or which("sf.exe")
 
 
+def _cli_env() -> dict:
+    # Recent CLIs redact secrets unless these are set; harmless on older CLIs.
+    env = dict(os.environ)
+    env.setdefault("SF_TEMP_SHOW_SECRETS", "true")
+    env.setdefault("SFDX_TEMP_SHOW_SECRETS", "true")
+    return env
+
+
 def sf_org_display(target_org: str | None = None, verbose: bool = False) -> dict:
     sf_bin = resolve_sf_cli()
     if not sf_bin:
@@ -100,7 +109,9 @@ def sf_org_display(target_org: str | None = None, verbose: bool = False) -> dict
     if target_org:
         cmd.extend(["--target-org", target_org])
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO), check=False)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=str(REPO), check=False, env=_cli_env()
+        )
     except OSError as exc:
         return {"ok": False, "error": f"Failed to run sf CLI: {exc}"}
     if proc.returncode != 0:
@@ -111,6 +122,36 @@ def sf_org_display(target_org: str | None = None, verbose: bool = False) -> dict
     except ValueError:
         return {"ok": False, "error": "Unable to parse sf org display output"}
     return {"ok": True, "result": res}
+
+
+def sf_access_token(target_org: str | None = None) -> str:
+    """Retrieve an access token with the supported dedicated command.
+
+    Reading the token from `sf org display` is deprecated and recent CLIs redact
+    it. `sf org auth show-access-token --json` is the supported path and the
+    --json flag also skips its interactive confirmation prompt. Returns "" when
+    the command is unavailable (older CLI) so callers can fall back to display.
+    """
+    sf_bin = resolve_sf_cli()
+    if not sf_bin:
+        return ""
+    cmd = [sf_bin, "org", "auth", "show-access-token", "--json", "--no-prompt"]
+    if target_org:
+        cmd.extend(["--target-org", target_org])
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=str(REPO), check=False, env=_cli_env()
+        )
+    except OSError:
+        return ""
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return ""
+    try:
+        res = json.loads(proc.stdout).get("result") or {}
+    except ValueError:
+        return ""
+    tok = str(res.get("accessToken") or "").strip()
+    return tok if tok and not tok.startswith("[REDACTED]") else ""
 
 
 def read_org_context(target_org: str | None = None) -> dict:
@@ -124,17 +165,28 @@ def read_org_context(target_org: str | None = None) -> dict:
     if not primary.get("ok"):
         return primary
     res = primary.get("result") or {}
-    token = str(res.get("accessToken") or "")
-    if not token or token.startswith("[REDACTED]"):
-        secondary = sf_org_display(target_org=target_org, verbose=True)
-        if secondary.get("ok"):
-            res = secondary.get("result") or res
+    # instanceUrl / id / username are not secrets and come from org display.
+    # The token comes from the supported show-access-token command; only if that
+    # is unavailable (older CLI) do we fall back to reading it from display.
+    token = sf_access_token(target_org=target_org)
+    if not token:
+        raw = str(res.get("accessToken") or "")
+        if raw and not raw.startswith("[REDACTED]"):
+            token = raw
+        else:
+            secondary = sf_org_display(target_org=target_org, verbose=True)
+            if secondary.get("ok"):
+                res2 = secondary.get("result") or {}
+                raw2 = str(res2.get("accessToken") or "")
+                if raw2 and not raw2.startswith("[REDACTED]"):
+                    token = raw2
+                res = {**res, **{k: v for k, v in res2.items() if v}}
     return {
         "ok": True,
         "orgId": res.get("id"),
         "username": res.get("username"),
         "instanceUrl": res.get("instanceUrl"),
-        "accessToken": res.get("accessToken"),
+        "accessToken": token or None,
         "alias": res.get("alias"),
     }
 
@@ -202,7 +254,9 @@ def list_spaces_for_org(target_org: str) -> list[str]:
     token = str(ctx.get("accessToken") or "")
     if not token or token.startswith("[REDACTED]"):
         raise RuntimeError(
-            "CLI token is redacted for this org. Re-login with 'sf org login web --alias <alias>' and retry."
+            "Could not read an access token from the Salesforce CLI. Update the CLI so it has "
+            "'sf org auth show-access-token' (npm install --global @salesforce/cli@latest), then "
+            "re-login with 'sf org login web --alias <alias>' and retry."
         )
     instance = str(ctx.get("instanceUrl") or "").rstrip("/")
     if not instance:
@@ -765,7 +819,29 @@ def api_org_spaces(org: str):
         spaces = list_spaces_for_org(org)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"org": org, "spaces": spaces, "count": len(spaces)}
+    result = {"org": org, "spaces": spaces, "count": len(spaces)}
+    if not spaces:
+        # The token worked (no error was raised) but Data Cloud returned no data
+        # spaces. This is almost always a context mismatch, not a code problem, so
+        # surface exactly which org/user the CLI token belongs to.
+        ctx = read_org_context(target_org=org)
+        result["diagnostic"] = {
+            "message": (
+                "The CLI authenticated successfully but Data Cloud returned 0 data spaces "
+                "for this org/user. Common causes: (1) the CLI is logged into a different org "
+                "or user than the one where you see data spaces in the UI; (2) the CLI user "
+                "lacks a Data Cloud permission set / Data Cloud is not provisioned for that "
+                "user. Confirm the org/user below matches the UI, and that this user has Data "
+                "Cloud Admin (or equivalent) access."
+            ),
+            "tokenBelongsTo": {
+                "orgId": ctx.get("orgId"),
+                "username": ctx.get("username"),
+                "instanceUrl": ctx.get("instanceUrl"),
+                "alias": ctx.get("alias"),
+            },
+        }
+    return result
 
 
 @app.get("/api/compare/items")
